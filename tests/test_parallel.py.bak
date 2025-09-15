@@ -1,0 +1,507 @@
+"""
+Testes para o módulo parallel.py
+"""
+import pytest
+import asyncio
+import time
+from unittest.mock import Mock, patch, AsyncMock
+from dataclasses import asdict
+
+from parallel import (
+    WorkerStats, RateLimiter, ParallelProcessor
+)
+from chunker import TextChunk
+from translator import TranslationConfig
+
+
+class TestWorkerStats:
+    """Testes para a classe WorkerStats."""
+    
+    def test_worker_stats_creation(self):
+        """Testa criação de estatísticas de worker."""
+        stats = WorkerStats(worker_id=1)
+        
+        assert stats.worker_id == 1
+        assert stats.chapters_processed == 0
+        assert stats.chunks_processed == 0
+        assert stats.errors_count == 0
+        assert stats.total_processing_time == 0.0
+        assert stats.last_activity is None
+    
+    def test_worker_stats_with_data(self):
+        """Testa criação com dados iniciais."""
+        stats = WorkerStats(
+            worker_id=2,
+            chapters_processed=5,
+            chunks_processed=50,
+            errors_count=2,
+            total_processing_time=120.5,
+            last_activity="Processando capítulo 3"
+        )
+        
+        assert stats.worker_id == 2
+        assert stats.chapters_processed == 5
+        assert stats.chunks_processed == 50
+        assert stats.errors_count == 2
+        assert stats.total_processing_time == 120.5
+        assert stats.last_activity == "Processando capítulo 3"
+
+
+class TestRateLimiter:
+    """Testes para a classe RateLimiter."""
+    
+    def test_rate_limiter_creation(self):
+        """Testa criação do rate limiter."""
+        limiter = RateLimiter(calls_per_second=2.0)
+        
+        assert limiter.calls_per_second == 2.0
+        assert limiter.min_interval == 0.5  # 1/2
+        assert limiter.last_call_time == 0.0
+    
+    def test_rate_limiter_zero_limit(self):
+        """Testa rate limiter sem limite."""
+        limiter = RateLimiter(calls_per_second=0)
+        
+        assert limiter.min_interval == 0
+    
+    @pytest.mark.asyncio
+    async def test_rate_limiter_acquire_first_call(self):
+        """Testa primeira aquisição (sem delay)."""
+        limiter = RateLimiter(calls_per_second=2.0)
+        
+        start_time = time.time()
+        await limiter.acquire()
+        end_time = time.time()
+        
+        # Primeira chamada não deve ter delay significativo
+        assert (end_time - start_time) < 0.1
+        assert limiter.last_call_time > 0
+    
+    @pytest.mark.asyncio
+    async def test_rate_limiter_acquire_with_delay(self):
+        """Testa aquisição com delay necessário."""
+        limiter = RateLimiter(calls_per_second=2.0)  # Max 1 call per 0.5s
+        
+        # Primeira chamada
+        await limiter.acquire()
+        
+        # Segunda chamada imediata deve aguardar
+        start_time = time.time()
+        await limiter.acquire()
+        end_time = time.time()
+        
+        elapsed = end_time - start_time
+        # Deve ter aguardado pelo menos o intervalo mínimo (com margem)
+        assert elapsed >= 0.4  # 0.5s - margem para timing
+    
+    @pytest.mark.asyncio
+    async def test_rate_limiter_no_limit(self):
+        """Testa rate limiter sem limite."""
+        limiter = RateLimiter(calls_per_second=0)
+        
+        start_time = time.time()
+        await limiter.acquire()
+        await limiter.acquire()
+        end_time = time.time()
+        
+        # Não deve ter delay significativo
+        assert (end_time - start_time) < 0.1
+
+
+class TestParallelTranslationManager:
+    """Testes para a classe ParallelTranslationManager."""
+    
+    def setup_method(self):
+        """Configuração para cada teste."""
+        self.config = TranslationConfig(model="gpt-4")
+        self.manager = ParallelTranslationManager(
+            config=self.config,
+            max_workers=2,
+            rate_limit=1.0
+        )
+    
+    def test_manager_initialization(self):
+        """Testa inicialização do manager."""
+        assert self.manager.config == self.config
+        assert self.manager.max_workers == 2
+        assert self.manager.rate_limit == 1.0
+        assert len(self.manager.workers) == 0
+        assert len(self.manager.worker_stats) == 0
+        assert isinstance(self.manager.rate_limiter, RateLimiter)
+    
+    def test_manager_custom_initialization(self):
+        """Testa inicialização com parâmetros personalizados."""
+        manager = ParallelTranslationManager(
+            config=self.config,
+            max_workers=4,
+            rate_limit=5.0,
+            retry_attempts=5,
+            timeout=120
+        )
+        
+        assert manager.max_workers == 4
+        assert manager.rate_limit == 5.0
+        assert manager.retry_attempts == 5
+        assert manager.timeout == 120
+    
+    def create_sample_chunks(self, count=5):
+        """Cria chunks de exemplo para testes."""
+        chunks = []
+        for i in range(count):
+            chunk = TextChunk(
+                content=f"Conteúdo do chunk {i+1}",
+                start_pos=i * 100,
+                end_pos=(i+1) * 100,
+                chunk_id=i,
+                chapter_id=f"cap_{(i//2)+1}"
+            )
+            chunks.append(chunk)
+        return chunks
+    
+    @pytest.mark.asyncio
+    async def test_translate_chunks_success(self):
+        """Testa tradução bem-sucedida de chunks."""
+        chunks = self.create_sample_chunks(3)
+        
+        # Mock do cliente de tradução
+        mock_client = AsyncMock()
+        mock_client.translate_text.return_value = {
+            'translated_text': 'Texto traduzido',
+            'usage': {'total_tokens': 100}
+        }
+        
+        with patch('parallel.TranslationClient', return_value=mock_client):
+            results = await self.manager.translate_chunks(chunks)
+        
+        assert len(results) == 3
+        
+        for i, result in enumerate(results):
+            assert result['chunk_id'] == i
+            assert result['translated_text'] == 'Texto traduzido'
+            assert 'usage' in result
+            assert 'processing_time' in result
+    
+    @pytest.mark.asyncio
+    async def test_translate_chunks_with_errors(self):
+        """Testa tradução com alguns erros."""
+        chunks = self.create_sample_chunks(3)
+        
+        # Mock que falha no segundo chunk
+        mock_client = AsyncMock()
+        mock_client.translate_text.side_effect = [
+            {'translated_text': 'Chunk 1 ok', 'usage': {'total_tokens': 100}},
+            Exception("Erro no chunk 2"),
+            {'translated_text': 'Chunk 3 ok', 'usage': {'total_tokens': 100}}
+        ]
+        
+        with patch('parallel.TranslationClient', return_value=mock_client):
+            results = await self.manager.translate_chunks(chunks)
+        
+        # Deve retornar resultados para todos os chunks
+        assert len(results) == 3
+        
+        # Chunks 1 e 3 devem ter sucesso
+        successful = [r for r in results if 'error' not in r]
+        failed = [r for r in results if 'error' in r]
+        
+        assert len(successful) == 2
+        assert len(failed) == 1
+        assert failed[0]['chunk_id'] == 1  # Chunk do meio
+    
+    @pytest.mark.asyncio
+    async def test_translate_chapters_success(self):
+        """Testa tradução de capítulos completos."""
+        chapters = [
+            {
+                'id': 'cap1',
+                'title': 'Capítulo 1',
+                'content': 'Conteúdo do capítulo 1 com texto suficiente para ser dividido.'
+            },
+            {
+                'id': 'cap2', 
+                'title': 'Capítulo 2',
+                'content': 'Conteúdo do capítulo 2 também com texto suficiente.'
+            }
+        ]
+        
+        # Mock do cliente
+        mock_client = AsyncMock()
+        mock_client.translate_text.return_value = {
+            'translated_text': 'Conteúdo traduzido',
+            'usage': {'total_tokens': 100}
+        }
+        
+        with patch('parallel.TranslationClient', return_value=mock_client):
+            with patch('parallel.TextChunker') as mock_chunker_class:
+                # Mock do chunker
+                mock_chunker = Mock()
+                mock_chunks = self.create_sample_chunks(2)
+                mock_chunker.chunk_chapters.return_value = [
+                    [mock_chunks[0]],  # Cap 1: 1 chunk
+                    [mock_chunks[1]]   # Cap 2: 1 chunk
+                ]
+                mock_chunker_class.return_value = mock_chunker
+                
+                results = await self.manager.translate_chapters(chapters)
+        
+        assert len(results) == 2
+        
+        for chapter_result in results:
+            assert 'chapter_id' in chapter_result
+            assert 'chunks' in chapter_result
+            assert 'stats' in chapter_result
+    
+    @pytest.mark.asyncio
+    async def test_progress_callback(self):
+        """Testa callback de progresso."""
+        chunks = self.create_sample_chunks(2)
+        progress_calls = []
+        
+        def progress_callback(current, total, chunk_id=None):
+            progress_calls.append((current, total, chunk_id))
+        
+        mock_client = AsyncMock()
+        mock_client.translate_text.return_value = {
+            'translated_text': 'Traduzido',
+            'usage': {'total_tokens': 50}
+        }
+        
+        with patch('parallel.TranslationClient', return_value=mock_client):
+            await self.manager.translate_chunks(chunks, progress_callback=progress_callback)
+        
+        # Deve ter chamado o callback para cada chunk
+        assert len(progress_calls) >= 2
+        
+        # Último callback deve indicar conclusão
+        final_call = progress_calls[-1]
+        assert final_call[0] == final_call[1]  # current == total
+    
+    @pytest.mark.asyncio
+    async def test_worker_stats_tracking(self):
+        """Testa rastreamento de estatísticas dos workers."""
+        chunks = self.create_sample_chunks(4)
+        
+        mock_client = AsyncMock()
+        mock_client.translate_text.return_value = {
+            'translated_text': 'Traduzido',
+            'usage': {'total_tokens': 100}
+        }
+        
+        with patch('parallel.TranslationClient', return_value=mock_client):
+            await self.manager.translate_chunks(chunks)
+        
+        # Deve ter criado estatísticas para os workers usados
+        assert len(self.manager.worker_stats) > 0
+        
+        # Verifica se as estatísticas fazem sentido
+        total_chunks_processed = sum(
+            stats.chunks_processed for stats in self.manager.worker_stats.values()
+        )
+        assert total_chunks_processed == len(chunks)
+    
+    def test_get_stats(self):
+        """Testa obtenção de estatísticas."""
+        # Adiciona algumas estatísticas fictícias
+        self.manager.worker_stats[0] = WorkerStats(
+            worker_id=0,
+            chunks_processed=10,
+            errors_count=1,
+            total_processing_time=120.0
+        )
+        self.manager.worker_stats[1] = WorkerStats(
+            worker_id=1,
+            chunks_processed=8,
+            errors_count=0,
+            total_processing_time=100.0
+        )
+        
+        stats = self.manager.get_stats()
+        
+        assert stats['total_workers'] == 2
+        assert stats['total_chunks_processed'] == 18
+        assert stats['total_errors'] == 1
+        assert stats['total_processing_time'] == 220.0
+        assert stats['average_processing_time'] > 0
+        assert 'workers' in stats
+    
+    def test_reset_stats(self):
+        """Testa reset de estatísticas."""
+        # Adiciona estatísticas
+        self.manager.worker_stats[0] = WorkerStats(worker_id=0, chunks_processed=5)
+        
+        assert len(self.manager.worker_stats) == 1
+        
+        self.manager.reset_stats()
+        
+        assert len(self.manager.worker_stats) == 0
+    
+    @pytest.mark.asyncio
+    async def test_rate_limiting_integration(self):
+        """Testa integração com rate limiting."""
+        chunks = self.create_sample_chunks(2)
+        
+        # Rate limit bem baixo para forçar delays
+        manager = ParallelTranslationManager(
+            config=self.config,
+            max_workers=1,  # Um worker só
+            rate_limit=2.0  # 2 req/sec max
+        )
+        
+        mock_client = AsyncMock()
+        mock_client.translate_text.return_value = {
+            'translated_text': 'Traduzido',
+            'usage': {'total_tokens': 50}
+        }
+        
+        start_time = time.time()
+        
+        with patch('parallel.TranslationClient', return_value=mock_client):
+            await manager.translate_chunks(chunks)
+        
+        end_time = time.time()
+        elapsed = end_time - start_time
+        
+        # Com rate limit de 2/sec, 2 chunks devem demorar pelo menos 0.5s
+        assert elapsed >= 0.4  # Margem para variações
+    
+    @pytest.mark.asyncio
+    async def test_timeout_handling(self):
+        """Testa tratamento de timeout."""
+        chunks = self.create_sample_chunks(1)
+        
+        # Manager com timeout muito baixo
+        manager = ParallelTranslationManager(
+            config=self.config,
+            timeout=0.1  # 100ms
+        )
+        
+        # Mock que demora mais que o timeout
+        mock_client = AsyncMock()
+        async def slow_translate(*args, **kwargs):
+            await asyncio.sleep(0.2)  # Demora mais que o timeout
+            return {'translated_text': 'Tardio', 'usage': {'total_tokens': 50}}
+        
+        mock_client.translate_text = slow_translate
+        
+        with patch('parallel.TranslationClient', return_value=mock_client):
+            results = await manager.translate_chunks(chunks)
+        
+        # Deve resultar em erro de timeout
+        assert len(results) == 1
+        assert 'error' in results[0]
+        assert 'timeout' in results[0]['error'].lower()
+
+
+class TestIntegration:
+    """Testes de integração para processamento paralelo."""
+    
+    @pytest.mark.asyncio
+    async def test_complete_parallel_workflow(self):
+        """Testa fluxo completo de processamento paralelo."""
+        # Simula um livro pequeno
+        chapters = [
+            {
+                'id': 'cap1',
+                'title': 'Capítulo 1: O Início',
+                'content': 'Era uma vez um jovem herói chamado Rand al\'Thor. ' * 20
+            },
+            {
+                'id': 'cap2',
+                'title': 'Capítulo 2: A Jornada',
+                'content': 'A jornada começou em Emond\'s Field. ' * 20
+            }
+        ]
+        
+        config = TranslationConfig(model="gpt-4", target_language="pt-BR")
+        manager = ParallelTranslationManager(
+            config=config,
+            max_workers=2,
+            rate_limit=5.0
+        )
+        
+        # Mock do cliente com respostas realistas
+        mock_client = AsyncMock()
+        mock_client.translate_text.side_effect = lambda text: {
+            'translated_text': f'[TRADUZIDO] {text[:50]}...',
+            'usage': {
+                'prompt_tokens': len(text) // 4,
+                'completion_tokens': len(text) // 4,
+                'total_tokens': len(text) // 2
+            }
+        }
+        
+        progress_updates = []
+        def track_progress(current, total, chunk_id=None):
+            progress_updates.append((current, total))
+        
+        with patch('parallel.TranslationClient', return_value=mock_client):
+            results = await manager.translate_chapters(
+                chapters,
+                progress_callback=track_progress
+            )
+        
+        # Verifica resultados
+        assert len(results) == 2
+        
+        for result in results:
+            assert 'chapter_id' in result
+            assert 'chunks' in result
+            assert 'stats' in result
+            assert len(result['chunks']) > 0
+            
+            # Cada chunk deve ter tradução
+            for chunk in result['chunks']:
+                assert 'translated_text' in chunk
+                assert chunk['translated_text'].startswith('[TRADUZIDO]')
+        
+        # Verifica progresso
+        assert len(progress_updates) > 0
+        
+        # Verifica estatísticas
+        stats = manager.get_stats()
+        assert stats['total_chunks_processed'] > 0
+        assert stats['total_workers'] <= 2
+    
+    @pytest.mark.asyncio
+    async def test_error_recovery_workflow(self):
+        """Testa recuperação de erros no fluxo completo."""
+        chunks = [
+            TextChunk(content=f"Chunk {i}", start_pos=0, end_pos=10, 
+                     chunk_id=i, chapter_id="test")
+            for i in range(5)
+        ]
+        
+        config = TranslationConfig(model="gpt-4")
+        manager = ParallelTranslationManager(config=config, retry_attempts=2)
+        
+        # Mock que falha nas primeiras tentativas de alguns chunks
+        call_count = 0
+        async def flaky_translate(text):
+            nonlocal call_count
+            call_count += 1
+            
+            # Chunk 2 falha nas primeiras 2 tentativas
+            if "Chunk 2" in text and call_count <= 2:
+                raise Exception("Erro temporário")
+            
+            return {
+                'translated_text': f'Traduzido: {text}',
+                'usage': {'total_tokens': 50}
+            }
+        
+        mock_client = AsyncMock()
+        mock_client.translate_text = flaky_translate
+        
+        with patch('parallel.TranslationClient', return_value=mock_client):
+            results = await manager.translate_chunks(chunks)
+        
+        # Todos os chunks devem ter resultado (sucesso ou erro final)
+        assert len(results) == 5
+        
+        # A maioria deve ter sucesso
+        successful = [r for r in results if 'error' not in r]
+        assert len(successful) >= 4  # Pelo menos 4 de 5 devem funcionar
+        
+        # Verifica estatísticas incluem tentativas de retry
+        stats = manager.get_stats()
+        assert stats['total_chunks_processed'] >= 5

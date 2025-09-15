@@ -1,0 +1,597 @@
+"""
+Testes para o módulo progress.py
+"""
+import pytest
+import json
+import tempfile
+import os
+import aiofiles
+from unittest.mock import Mock, patch, AsyncMock, mock_open
+from datetime import datetime
+from pathlib import Path
+
+from progress import (
+    ChapterProgress, TranslationProgress, ProgressManager
+)
+
+
+class TestChapterProgress:
+    """Testes para a classe ChapterProgress."""
+    
+    def test_chapter_progress_creation(self):
+        """Testa criação de progresso de capítulo."""
+        progress = ChapterProgress(
+            chapter_id="cap1",
+            title="Capítulo 1",
+            total_chunks=10
+        )
+        
+        assert progress.chapter_id == "cap1"
+        assert progress.title == "Capítulo 1"
+        assert progress.total_chunks == 10
+        assert progress.completed_chunks == 0
+        assert progress.translated_chunks == []
+        assert progress.status == "pending"
+        assert progress.error is None
+        assert progress.start_time is None
+        assert progress.end_time is None
+    
+    def test_chapter_progress_with_data(self):
+        """Testa criação com dados iniciais."""
+        progress = ChapterProgress(
+            chapter_id="cap2",
+            title="Capítulo 2", 
+            total_chunks=5,
+            completed_chunks=3,
+            translated_chunks=["chunk1", "chunk2", "chunk3"],
+            status="in_progress",
+            start_time="2023-01-01T10:00:00"
+        )
+        
+        assert progress.completed_chunks == 3
+        assert len(progress.translated_chunks) == 3
+        assert progress.status == "in_progress"
+        assert progress.start_time == "2023-01-01T10:00:00"
+
+
+class TestTranslationProgress:
+    """Testes para a classe TranslationProgress."""
+    
+    def test_translation_progress_creation(self):
+        """Testa criação de progresso de tradução."""
+        progress = TranslationProgress(
+            input_file="livro.epub",
+            output_file="livro_pt.epub",
+            model="gpt-4",
+            target_language="pt-BR",
+            total_chapters=5
+        )
+        
+        assert progress.input_file == "livro.epub"
+        assert progress.output_file == "livro_pt.epub"
+        assert progress.model == "gpt-4"
+        assert progress.target_language == "pt-BR"
+        assert progress.total_chapters == 5
+        assert progress.completed_chapters == 0
+        assert len(progress.chapters) == 0
+        assert progress.status == "in_progress"
+        assert progress.error is None
+        
+        # Timestamps devem ser preenchidos
+        assert progress.start_time
+        assert progress.last_update
+    
+    def test_update_timestamp(self):
+        """Testa atualização de timestamp."""
+        progress = TranslationProgress(
+            input_file="test.epub",
+            output_file="test_pt.epub", 
+            model="gpt-4",
+            target_language="pt-BR",
+            total_chapters=1
+        )
+        
+        original_time = progress.last_update
+        
+        # Pequeno delay para garantir diferença no timestamp
+        import time
+        time.sleep(0.01)
+        
+        progress.update_timestamp()
+        
+        assert progress.last_update != original_time
+
+
+class TestProgressManager:
+    """Testes para a classe ProgressManager."""
+    
+    def setup_method(self):
+        """Configuração para cada teste."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.progress_file = os.path.join(self.temp_dir, "progress.json")
+        
+        self.manager = ProgressManager(
+            input_file="test.epub",
+            output_file="test_pt.epub",
+            model="gpt-4",
+            target_language="pt-BR",
+            progress_file=self.progress_file
+        )
+    
+    def teardown_method(self):
+        """Limpeza após cada teste."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def test_manager_initialization(self):
+        """Testa inicialização do manager."""
+        assert self.manager.progress_file == self.progress_file
+        assert self.manager.progress.input_file == "test.epub"
+        assert self.manager.progress.output_file == "test_pt.epub"  
+        assert self.manager.progress.model == "gpt-4"
+        assert self.manager.progress.target_language == "pt-BR"
+    
+    def test_add_chapters(self):
+        """Testa adição de capítulos."""
+        chapters = [
+            {"id": "cap1", "title": "Capítulo 1", "chunks": 5},
+            {"id": "cap2", "title": "Capítulo 2", "chunks": 8}
+        ]
+        
+        self.manager.add_chapters(chapters)
+        
+        assert len(self.manager.progress.chapters) == 2
+        assert self.manager.progress.total_chapters == 2
+        
+        # Verifica capítulo 1
+        cap1 = self.manager.progress.chapters["cap1"]
+        assert cap1.chapter_id == "cap1"
+        assert cap1.title == "Capítulo 1"
+        assert cap1.total_chunks == 5
+        assert cap1.status == "pending"
+        
+        # Verifica capítulo 2
+        cap2 = self.manager.progress.chapters["cap2"]
+        assert cap2.total_chunks == 8
+    
+    def test_start_chapter(self):
+        """Testa início de processamento de capítulo."""
+        chapters = [{"id": "cap1", "title": "Cap 1", "chunks": 3}]
+        self.manager.add_chapters(chapters)
+        
+        self.manager.start_chapter("cap1")
+        
+        cap1 = self.manager.progress.chapters["cap1"]
+        assert cap1.status == "in_progress"
+        assert cap1.start_time is not None
+    
+    def test_complete_chunk(self):
+        """Testa conclusão de chunk."""
+        chapters = [{"id": "cap1", "title": "Cap 1", "chunks": 3}]
+        self.manager.add_chapters(chapters)
+        self.manager.start_chapter("cap1")
+        
+        # Completa primeiro chunk
+        self.manager.complete_chunk("cap1", "chunk_1", "Texto traduzido")
+        
+        cap1 = self.manager.progress.chapters["cap1"]
+        assert cap1.completed_chunks == 1
+        assert "chunk_1" in cap1.translated_chunks
+        assert cap1.status == "in_progress"  # Ainda não terminou
+        
+        # Completa todos os chunks
+        self.manager.complete_chunk("cap1", "chunk_2", "Texto 2")
+        self.manager.complete_chunk("cap1", "chunk_3", "Texto 3")
+        
+        assert cap1.completed_chunks == 3
+        assert cap1.status == "completed"
+        assert cap1.end_time is not None
+        
+        # Progresso geral deve atualizar
+        assert self.manager.progress.completed_chapters == 1
+    
+    def test_mark_chapter_error(self):
+        """Testa marcação de erro em capítulo."""
+        chapters = [{"id": "cap1", "title": "Cap 1", "chunks": 3}]
+        self.manager.add_chapters(chapters)
+        self.manager.start_chapter("cap1")
+        
+        error_msg = "Erro na tradução"
+        self.manager.mark_chapter_error("cap1", error_msg)
+        
+        cap1 = self.manager.progress.chapters["cap1"]
+        assert cap1.status == "error"
+        assert cap1.error == error_msg
+        assert cap1.end_time is not None
+    
+    def test_get_progress_stats(self):
+        """Testa obtenção de estatísticas."""
+        chapters = [
+            {"id": "cap1", "title": "Cap 1", "chunks": 5},
+            {"id": "cap2", "title": "Cap 2", "chunks": 3}
+        ]
+        self.manager.add_chapters(chapters)
+        
+        # Completa primeiro capítulo
+        self.manager.start_chapter("cap1")
+        for i in range(5):
+            self.manager.complete_chunk("cap1", f"chunk_{i}", f"Texto {i}")
+        
+        # Inicia segundo capítulo
+        self.manager.start_chapter("cap2")
+        self.manager.complete_chunk("cap2", "chunk_0", "Texto 0")
+        
+        stats = self.manager.get_progress_stats()
+        
+        assert stats['total_chapters'] == 2
+        assert stats['completed_chapters'] == 1
+        assert stats['in_progress_chapters'] == 1
+        assert stats['total_chunks'] == 8
+        assert stats['completed_chunks'] == 6
+        assert stats['progress_percentage'] == 75.0  # 6/8 chunks
+    
+    def test_is_completed(self):
+        """Testa verificação de conclusão."""
+        chapters = [{"id": "cap1", "title": "Cap 1", "chunks": 2}]
+        self.manager.add_chapters(chapters)
+        
+        assert not self.manager.is_completed()
+        
+        # Completa o capítulo
+        self.manager.start_chapter("cap1")
+        self.manager.complete_chunk("cap1", "chunk_1", "Texto 1")
+        self.manager.complete_chunk("cap1", "chunk_2", "Texto 2")
+        
+        assert self.manager.is_completed()
+        assert self.manager.progress.status == "completed"
+    
+    @pytest.mark.asyncio
+    async def test_save_progress(self):
+        """Testa salvamento de progresso."""
+        chapters = [{"id": "cap1", "title": "Cap 1", "chunks": 1}]
+        self.manager.add_chapters(chapters)
+        
+        await self.manager.save_progress()
+        
+        # Verifica se arquivo foi criado
+        assert os.path.exists(self.progress_file)
+        
+        # Verifica conteúdo
+        with open(self.progress_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        assert data['input_file'] == "test.epub"
+        assert data['model'] == "gpt-4"
+        assert data['total_chapters'] == 1
+    
+    @pytest.mark.asyncio
+    async def test_load_progress(self):
+        """Testa carregamento de progresso."""
+        # Cria arquivo de progresso
+        progress_data = {
+            'input_file': 'loaded.epub',
+            'output_file': 'loaded_pt.epub',
+            'model': 'claude-3',
+            'target_language': 'pt-BR',
+            'total_chapters': 2,
+            'completed_chapters': 1,
+            'chapters': {
+                'cap1': {
+                    'chapter_id': 'cap1',
+                    'title': 'Carregado',
+                    'total_chunks': 3,
+                    'completed_chunks': 3, 
+                    'translated_chunks': ['c1', 'c2', 'c3'],
+                    'status': 'completed'
+                }
+            },
+            'start_time': '2023-01-01T10:00:00',
+            'last_update': '2023-01-01T11:00:00',
+            'status': 'in_progress'
+        }
+        
+        with open(self.progress_file, 'w', encoding='utf-8') as f:
+            json.dump(progress_data, f)
+        
+        # Carrega progresso
+        loaded_manager = await ProgressManager.load_progress(self.progress_file)
+        
+        assert loaded_manager.progress.input_file == 'loaded.epub'
+        assert loaded_manager.progress.model == 'claude-3'
+        assert loaded_manager.progress.completed_chapters == 1
+        assert len(loaded_manager.progress.chapters) == 1
+        
+        cap1 = loaded_manager.progress.chapters['cap1']
+        assert cap1.status == 'completed'
+        assert cap1.completed_chunks == 3
+
+
+class TestOutputManager:   
+    """Testes para a classe OutputManager."""
+    
+    def setup_method(self):
+        """Configuração para cada teste."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.output_file = os.path.join(self.temp_dir, "output.txt")
+        
+        self.output_manager = OutputManager(
+            output_file=self.output_file,
+            format="txt"
+        )
+    
+    def teardown_method(self):
+        """Limpeza após cada teste."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def test_output_manager_initialization(self):
+        """Testa inicialização do output manager."""
+        assert self.output_manager.output_file == self.output_file
+        assert self.output_manager.format == "txt"
+    
+    @pytest.mark.asyncio
+    async def test_write_chapter_txt(self):
+        """Testa escrita de capítulo em formato TXT."""
+        chapter_data = {
+            'chapter_id': 'cap1',
+            'title': 'Capítulo 1: O Início',
+            'chunks': [
+                {'chunk_id': 0, 'translated_text': 'Primeiro parágrafo traduzido.'},
+                {'chunk_id': 1, 'translated_text': 'Segundo parágrafo traduzido.'}
+            ]
+        }
+        
+        await self.output_manager.write_chapter(chapter_data)
+        
+        # Verifica se arquivo foi criado
+        assert os.path.exists(self.output_file)
+        
+        # Verifica conteúdo
+        with open(self.output_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        assert 'Capítulo 1: O Início' in content
+        assert 'Primeiro parágrafo traduzido.' in content
+        assert 'Segundo parágrafo traduzido.' in content
+    
+    @pytest.mark.asyncio
+    async def test_write_multiple_chapters(self):
+        """Testa escrita de múltiplos capítulos."""
+        chapters = [
+            {
+                'chapter_id': 'cap1',
+                'title': 'Capítulo 1',
+                'chunks': [{'chunk_id': 0, 'translated_text': 'Texto do cap 1'}]
+            },
+            {
+                'chapter_id': 'cap2', 
+                'title': 'Capítulo 2',
+                'chunks': [{'chunk_id': 0, 'translated_text': 'Texto do cap 2'}]
+            }
+        ]
+        
+        for chapter in chapters:
+            await self.output_manager.write_chapter(chapter)
+        
+        with open(self.output_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        assert 'Capítulo 1' in content
+        assert 'Capítulo 2' in content
+        assert 'Texto do cap 1' in content
+        assert 'Texto do cap 2' in content
+    
+    @pytest.mark.asyncio
+    async def test_finalize_output(self):
+        """Testa finalização do arquivo de saída."""
+        # Escreve alguns capítulos
+        chapter = {
+            'chapter_id': 'cap1',
+            'title': 'Teste',
+            'chunks': [{'chunk_id': 0, 'translated_text': 'Conteúdo teste'}]
+        }
+        await self.output_manager.write_chapter(chapter)
+        
+        # Finaliza
+        stats = {'total_chapters': 1, 'total_chunks': 1}
+        await self.output_manager.finalize(stats)
+        
+        with open(self.output_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Deve conter informações de conclusão
+        assert 'Tradução concluída' in content or 'total_chapters' in content.lower()
+
+
+class TestProgressPersistence:
+    """Testes para a classe ProgressPersistence."""
+    
+    def setup_method(self):
+        """Configuração para cada teste."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.progress_file = os.path.join(self.temp_dir, "persistence.json")
+        
+        self.persistence = ProgressPersistence(self.progress_file)
+    
+    def teardown_method(self):
+        """Limpeza após cada teste."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    @pytest.mark.asyncio
+    async def test_save_and_load_progress(self):
+        """Testa salvamento e carregamento de progresso."""
+        # Cria progresso de teste
+        progress = TranslationProgress(
+            input_file="test.epub",
+            output_file="test_pt.epub",
+            model="gpt-4",
+            target_language="pt-BR",
+            total_chapters=2
+        )
+        
+        # Adiciona um capítulo
+        chapter = ChapterProgress(
+            chapter_id="cap1",
+            title="Capítulo 1",
+            total_chunks=3,
+            completed_chunks=1,
+            status="in_progress"
+        )
+        progress.chapters["cap1"] = chapter
+        
+        # Salva
+        await self.persistence.save_progress(progress)
+        
+        # Verifica se arquivo existe
+        assert os.path.exists(self.progress_file)
+        
+        # Carrega
+        loaded_progress = await self.persistence.load_progress()
+        
+        assert loaded_progress.input_file == "test.epub"
+        assert loaded_progress.total_chapters == 2
+        assert len(loaded_progress.chapters) == 1
+        
+        loaded_chapter = loaded_progress.chapters["cap1"]
+        assert loaded_chapter.title == "Capítulo 1"
+        assert loaded_chapter.completed_chunks == 1
+        assert loaded_chapter.status == "in_progress"
+    
+    @pytest.mark.asyncio
+    async def test_load_nonexistent_file(self):
+        """Testa carregamento de arquivo inexistente."""
+        persistence = ProgressPersistence("/caminho/inexistente.json")
+        
+        with pytest.raises(FileNotFoundError):
+            await persistence.load_progress()
+    
+    @pytest.mark.asyncio
+    async def test_save_corrupted_data_recovery(self):
+        """Testa recuperação com dados corrompidos."""
+        # Cria arquivo com JSON inválido
+        with open(self.progress_file, 'w') as f:
+            f.write('{"json": "invalido"')
+        
+        # Tenta carregar
+        with pytest.raises(json.JSONDecodeError):
+            await self.persistence.load_progress()
+    
+    @pytest.mark.asyncio
+    async def test_backup_functionality(self):
+        """Testa funcionalidade de backup."""
+        progress = TranslationProgress(
+            input_file="backup_test.epub",
+            output_file="backup_test_pt.epub", 
+            model="gpt-4",
+            target_language="pt-BR",
+            total_chapters=1
+        )
+        
+        # Salva primeira versão
+        await self.persistence.save_progress(progress)
+        
+        # Modifica progresso
+        progress.completed_chapters = 1
+        
+        # Salva novamente (deve criar backup)
+        await self.persistence.save_progress(progress, create_backup=True)
+        
+        # Verifica se backup foi criado
+        backup_files = [f for f in os.listdir(self.temp_dir) if 'backup' in f]
+        assert len(backup_files) > 0
+
+
+class TestIntegration:
+    """Testes de integração para o sistema de progresso."""
+    
+    @pytest.mark.asyncio
+    async def test_complete_progress_workflow(self):
+        """Testa fluxo completo de progresso."""
+        temp_dir = tempfile.mkdtemp()
+        progress_file = os.path.join(temp_dir, "integration.json")
+        output_file = os.path.join(temp_dir, "output.txt")
+        
+        try:
+            # Cria manager
+            manager = ProgressManager(
+                input_file="integration.epub",
+                output_file=output_file,
+                model="gpt-4",
+                target_language="pt-BR",
+                progress_file=progress_file
+            )
+            
+            # Adiciona capítulos
+            chapters = [
+                {"id": "cap1", "title": "Capítulo 1", "chunks": 2},
+                {"id": "cap2", "title": "Capítulo 2", "chunks": 3}
+            ]
+            manager.add_chapters(chapters)
+            
+            # Processa primeiro capítulo completamente
+            manager.start_chapter("cap1")
+            manager.complete_chunk("cap1", "chunk_0", "Primeiro chunk traduzido")
+            manager.complete_chunk("cap1", "chunk_1", "Segundo chunk traduzido")
+            
+            # Processa segundo capítulo parcialmente
+            manager.start_chapter("cap2")
+            manager.complete_chunk("cap2", "chunk_0", "Chunk inicial cap 2")
+            
+            # Salva progresso
+            await manager.save_progress()
+            
+            # Simula reinicialização - carrega progresso
+            loaded_manager = await ProgressManager.load_progress(progress_file)
+            
+            # Verifica estado carregado
+            assert loaded_manager.progress.completed_chapters == 1
+            assert len(loaded_manager.progress.chapters) == 2
+            
+            cap1 = loaded_manager.progress.chapters["cap1"]
+            assert cap1.status == "completed"
+            assert cap1.completed_chunks == 2
+            
+            cap2 = loaded_manager.progress.chapters["cap2"]
+            assert cap2.status == "in_progress"  
+            assert cap2.completed_chunks == 1
+            
+            # Continua processamento
+            loaded_manager.complete_chunk("cap2", "chunk_1", "Segundo chunk cap 2")
+            loaded_manager.complete_chunk("cap2", "chunk_2", "Último chunk cap 2")
+            
+            # Verifica conclusão
+            assert loaded_manager.is_completed()
+            
+            # Cria output manager e gera saída
+            output_manager = OutputManager(output_file, "txt")
+            
+            for chapter_id, chapter_progress in loaded_manager.progress.chapters.items():
+                chapter_data = {
+                    'chapter_id': chapter_id,
+                    'title': chapter_progress.title,
+                    'chunks': [
+                        {'chunk_id': i, 'translated_text': chunk}
+                        for i, chunk in enumerate(chapter_progress.translated_chunks)
+                    ]
+                }
+                await output_manager.write_chapter(chapter_data)
+            
+            stats = loaded_manager.get_progress_stats()
+            await output_manager.finalize(stats)
+            
+            # Verifica arquivo de saída
+            assert os.path.exists(output_file)
+            
+            with open(output_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            assert "Capítulo 1" in content
+            assert "Capítulo 2" in content
+            assert "Primeiro chunk traduzido" in content
+            assert "Último chunk cap 2" in content
+            
+        finally:
+            # Limpeza
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)

@@ -1,0 +1,588 @@
+"""
+Testes para o módulo logging_config.py
+"""
+import pytest
+import logging
+import tempfile
+import os
+import sys
+from io import StringIO
+from unittest.mock import Mock, patch, mock_open
+
+from logging_config import (
+    ColoredFormatter, CleanTerminalHandler, setup_logging
+)
+
+
+class TestColoredFormatter:
+    """Testes para a classe ColoredFormatter."""
+    
+    def test_colored_formatter_creation(self):
+        """Testa criação do formatter colorido."""
+        formatter = ColoredFormatter(
+            fmt='%(levelname)s - %(message)s'
+        )
+        
+        assert formatter is not None
+        assert hasattr(formatter, 'COLORS')
+    
+    def test_format_with_colors(self):
+        """Testa formatação com cores."""
+        formatter = ColoredFormatter(
+            fmt='%(levelname)s - %(message)s'
+        )
+        
+        # Cria record de teste
+        record = logging.LogRecord(
+            name='test',
+            level=logging.INFO,
+            pathname='test.py',
+            lineno=1,
+            msg='Test message',
+            args=(),
+            exc_info=None
+        )
+        
+        formatted = formatter.format(record)
+        
+        # Deve conter códigos de cor ANSI
+        assert '\033[32m' in formatted  # Verde para INFO
+        assert '\033[0m' in formatted   # Reset
+        assert 'Test message' in formatted
+    
+    def test_format_different_levels(self):
+        """Testa formatação para diferentes níveis."""
+        formatter = ColoredFormatter(fmt='%(levelname)s')
+        
+        levels_and_colors = [
+            (logging.DEBUG, '\033[36m'),    # Ciano
+            (logging.INFO, '\033[32m'),     # Verde
+            (logging.WARNING, '\033[33m'),  # Amarelo
+            (logging.ERROR, '\033[31m'),    # Vermelho
+            (logging.CRITICAL, '\033[35m'), # Magenta
+        ]
+        
+        for level, expected_color in levels_and_colors:
+            record = logging.LogRecord(
+                name='test', level=level, pathname='test.py', lineno=1,
+                msg='Test', args=(), exc_info=None
+            )
+            
+            formatted = formatter.format(record)
+            assert expected_color in formatted
+    
+    def test_format_unknown_level(self):
+        """Testa formatação para nível desconhecido."""
+        formatter = ColoredFormatter(fmt='%(levelname)s')
+        
+        # Cria record com nível customizado
+        record = logging.LogRecord(
+            name='test', level=25, pathname='test.py', lineno=1,
+            msg='Test', args=(), exc_info=None
+        )
+        record.levelname = 'CUSTOM'
+        
+        formatted = formatter.format(record)
+        
+        # Deve usar cor de reset (sem cor específica)
+        assert 'CUSTOM' in formatted
+        assert '\033[0m' in formatted
+
+
+class TestCleanTerminalHandler:
+    """Testes para a classe CleanTerminalHandler."""
+    
+    def test_clean_terminal_handler_creation(self):
+        """Testa criação do handler limpo."""
+        handler = CleanTerminalHandler(show_debug=True)
+        
+        assert handler.show_debug is True
+        assert handler.last_message == ""
+    
+    def test_clean_terminal_handler_default(self):
+        """Testa criação com configuração padrão."""
+        handler = CleanTerminalHandler()
+        
+        assert handler.show_debug is False
+    
+    def test_emit_info_message(self):
+        """Testa emissão de mensagem INFO."""
+        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+            handler = CleanTerminalHandler()
+            
+            # Cria record INFO
+            record = logging.LogRecord(
+                name='test', level=logging.INFO, pathname='test.py', lineno=1,
+                msg='Important info', args=(), exc_info=None
+            )
+            
+            handler.emit(record)
+            
+            # INFO deve ser mostrado
+            output = mock_stdout.getvalue()
+            assert 'Important info' in output
+    
+    def test_emit_debug_message_hidden(self):
+        """Testa que mensagens DEBUG são ocultadas por padrão."""
+        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+            handler = CleanTerminalHandler(show_debug=False)
+            
+            record = logging.LogRecord(
+                name='test', level=logging.DEBUG, pathname='test.py', lineno=1,
+                msg='Debug info', args=(), exc_info=None
+            )
+            
+            handler.emit(record)
+            
+            # DEBUG não deve ser mostrado
+            output = mock_stdout.getvalue()
+            assert 'Debug info' not in output
+    
+    def test_emit_debug_message_shown(self):
+        """Testa que mensagens DEBUG são mostradas quando habilitadas."""
+        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+            handler = CleanTerminalHandler(show_debug=True)
+            
+            record = logging.LogRecord(
+                name='test', level=logging.DEBUG, pathname='test.py', lineno=1,
+                msg='Debug info', args=(), exc_info=None
+            )
+            
+            handler.emit(record)
+            
+            # DEBUG deve ser mostrado
+            output = mock_stdout.getvalue()
+            assert 'Debug info' in output
+    
+    def test_emit_error_message(self):
+        """Testa emissão de mensagem ERROR."""
+        with patch('sys.stderr', new_callable=StringIO) as mock_stderr:
+            handler = CleanTerminalHandler()
+            
+            record = logging.LogRecord(
+                name='test', level=logging.ERROR, pathname='test.py', lineno=1,
+                msg='Error occurred', args=(), exc_info=None
+            )
+            
+            handler.emit(record)
+            
+            # ERROR deve ser mostrado no stderr
+            output = mock_stderr.getvalue()
+            assert 'Error occurred' in output
+    
+    def test_duplicate_message_filtering(self):
+        """Testa filtragem de mensagens duplicadas."""
+        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+            handler = CleanTerminalHandler()
+            
+            record = logging.LogRecord(
+                name='test', level=logging.INFO, pathname='test.py', lineno=1,
+                msg='Repeated message', args=(), exc_info=None
+            )
+            
+            # Emite a mesma mensagem duas vezes
+            handler.emit(record)
+            handler.emit(record)
+            
+            output = mock_stdout.getvalue()
+            
+            # Deve aparecer apenas uma vez (ou com indicação de repetição)
+            count = output.count('Repeated message')
+            assert count <= 2  # No máximo duas aparições (original + "repetido")
+
+
+class TestStructuredFileHandler:
+    """Testes para a classe StructuredFileHandler."""
+    
+    def setup_method(self):
+        """Configuração para cada teste."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.log_file = os.path.join(self.temp_dir, "test.log")
+    
+    def teardown_method(self):
+        """Limpeza após cada teste."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def test_structured_file_handler_creation(self):
+        """Testa criação do handler de arquivo estruturado."""
+        handler = StructuredFileHandler(
+            filename=self.log_file,
+            max_bytes=1024,
+            backup_count=3
+        )
+        
+        assert handler.maxBytes == 1024
+        assert handler.backupCount == 3
+    
+    def test_emit_to_file(self):
+        """Testa emissão para arquivo."""
+        handler = StructuredFileHandler(self.log_file)
+        
+        record = logging.LogRecord(
+            name='test', level=logging.INFO, pathname='test.py', lineno=1,
+            msg='File log message', args=(), exc_info=None
+        )
+        
+        handler.emit(record)
+        handler.close()
+        
+        # Verifica se arquivo foi criado e contém a mensagem
+        assert os.path.exists(self.log_file)
+        
+        with open(self.log_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        assert 'File log message' in content
+    
+    def test_structured_format(self):
+        """Testa formato estruturado do log."""
+        handler = StructuredFileHandler(self.log_file)
+        
+        record = logging.LogRecord(
+            name='test.module', level=logging.WARNING, pathname='/path/test.py', 
+            lineno=42, msg='Structured message', args=(), exc_info=None
+        )
+        
+        handler.emit(record)
+        handler.close()
+        
+        with open(self.log_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Deve conter informações estruturadas
+        assert 'WARNING' in content
+        assert 'test.module' in content
+        assert 'Structured message' in content
+        assert '42' in content  # Número da linha
+    
+    def test_rotation(self):
+        """Testa rotação de arquivos."""
+        # Handler com tamanho muito pequeno para forçar rotação
+        handler = StructuredFileHandler(
+            filename=self.log_file,
+            max_bytes=100,  # Muito pequeno
+            backup_count=2
+        )
+        
+        # Gera muitos logs para forçar rotação
+        for i in range(20):
+            record = logging.LogRecord(
+                name='test', level=logging.INFO, pathname='test.py', lineno=i,
+                msg=f'Long message number {i} with lots of text to fill up the log file',
+                args=(), exc_info=None
+            )
+            handler.emit(record)
+        
+        handler.close()
+        
+        # Deve ter criado arquivos de backup
+        log_files = [f for f in os.listdir(self.temp_dir) if f.startswith('test.log')]
+        assert len(log_files) > 1  # Arquivo principal + backups
+
+
+class TestSetupLogging:
+    """Testes para a função setup_logging."""
+    
+    def setup_method(self):
+        """Configuração para cada teste."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.log_file = os.path.join(self.temp_dir, "setup_test.log")
+        
+    def teardown_method(self):
+        """Limpeza após cada teste."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+        
+        # Limpa handlers do logger raiz
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+    
+    def test_setup_logging_basic(self):
+        """Testa configuração básica do logging."""
+        setup_logging(
+            log_file=self.log_file,
+            level=logging.INFO,
+            show_debug=False
+        )
+        
+        # Verifica se logger raiz foi configurado
+        root_logger = logging.getLogger()
+        assert root_logger.level <= logging.INFO
+        
+        # Verifica se handlers foram adicionados
+        assert len(root_logger.handlers) > 0
+        
+        # Testa log
+        logging.info("Test setup message")
+        
+        # Verifica arquivo
+        assert os.path.exists(self.log_file)
+        
+        with open(self.log_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        assert 'Test setup message' in content
+    
+    def test_setup_logging_with_debug(self):
+        """Testa configuração com debug habilitado."""
+        setup_logging(
+            log_file=self.log_file,
+            level=logging.DEBUG,
+            show_debug=True
+        )
+        
+        root_logger = logging.getLogger()
+        assert root_logger.level <= logging.DEBUG
+        
+        # Testa debug
+        logging.debug("Debug message")
+        
+        with open(self.log_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        assert 'Debug message' in content
+    
+    def test_setup_logging_custom_format(self):
+        """Testa configuração com formato personalizado."""
+        custom_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+        
+        setup_logging(
+            log_file=self.log_file,
+            level=logging.INFO,
+            log_format=custom_format
+        )
+        
+        logging.info("Custom format test")
+        
+        with open(self.log_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Deve conter elementos do formato personalizado
+        assert '[INFO]' in content
+        assert 'Custom format test' in content
+    
+    def test_setup_logging_no_file(self):
+        """Testa configuração sem arquivo de log."""
+        setup_logging(
+            log_file=None,
+            level=logging.INFO
+        )
+        
+        root_logger = logging.getLogger()
+        
+        # Deve ter pelo menos handler de terminal
+        terminal_handlers = [
+            h for h in root_logger.handlers 
+            if isinstance(h, CleanTerminalHandler)
+        ]
+        assert len(terminal_handlers) > 0
+    
+    def test_setup_logging_log_directory_creation(self):
+        """Testa criação automática de diretório de logs."""
+        nested_log_dir = os.path.join(self.temp_dir, "logs", "nested")
+        nested_log_file = os.path.join(nested_log_dir, "test.log")
+        
+        # Diretório não existe inicialmente
+        assert not os.path.exists(nested_log_dir)
+        
+        setup_logging(log_file=nested_log_file, level=logging.INFO)
+        
+        logging.info("Directory creation test")
+        
+        # Diretório deve ter sido criado
+        assert os.path.exists(nested_log_dir)
+        assert os.path.exists(nested_log_file)
+
+
+class TestGetLogger:
+    """Testes para a função get_logger."""
+    
+    def test_get_logger_default(self):
+        """Testa obtenção de logger padrão."""
+        logger = get_logger(__name__)
+        
+        assert logger is not None
+        assert logger.name == __name__
+        assert isinstance(logger, logging.Logger)
+    
+    def test_get_logger_custom_level(self):
+        """Testa obtenção de logger com nível personalizado."""
+        logger = get_logger("test.custom", level=logging.WARNING)
+        
+        assert logger.level <= logging.WARNING
+    
+    def test_get_logger_singleton_behavior(self):
+        """Testa comportamento singleton dos loggers."""
+        logger1 = get_logger("test.singleton")
+        logger2 = get_logger("test.singleton")
+        
+        # Deve retornar a mesma instância
+        assert logger1 is logger2
+    
+    def test_get_logger_with_setup(self):
+        """Testa logger após configuração do sistema."""
+        temp_dir = tempfile.mkdtemp()
+        log_file = os.path.join(temp_dir, "get_logger_test.log")
+        
+        try:
+            # Configura sistema de logging
+            setup_logging(log_file=log_file, level=logging.INFO)
+            
+            # Obtém logger
+            logger = get_logger("test.with_setup")
+            
+            # Testa funcionamento
+            logger.info("Test message from get_logger")
+            
+            # Verifica arquivo
+            assert os.path.exists(log_file)
+            
+            with open(log_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            assert 'Test message from get_logger' in content
+            
+        finally:
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class TestIntegration:
+    """Testes de integração para o sistema de logging."""
+    
+    def setup_method(self):
+        """Configuração para cada teste."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.log_file = os.path.join(self.temp_dir, "integration.log")
+    
+    def teardown_method(self):
+        """Limpeza após cada teste."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+        
+        # Limpa handlers
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+    
+    def test_complete_logging_workflow(self):
+        """Testa fluxo completo do sistema de logging."""
+        # Configura logging
+        setup_logging(
+            log_file=self.log_file,
+            level=logging.DEBUG,
+            show_debug=True,
+            max_file_size=1024 * 1024,  # 1MB
+            backup_count=3
+        )
+        
+        # Cria loggers específicos
+        main_logger = get_logger("tradutor.main")
+        chunk_logger = get_logger("tradutor.chunker")
+        translate_logger = get_logger("tradutor.translator")
+        
+        # Simula diferentes tipos de logs
+        main_logger.info("Iniciando tradução de livro.epub")
+        chunk_logger.debug("Fragmentando capítulo 1 em chunks")
+        translate_logger.info("Traduzindo chunk 1/50")
+        translate_logger.warning("Rate limit atingido, aguardando...")
+        
+        try:
+            raise ValueError("Erro simulado na tradução")
+        except Exception as e:
+            translate_logger.error(f"Erro na tradução: {e}", exc_info=True)
+        
+        chunk_logger.info("Chunk traduzido com sucesso")
+        main_logger.info("Tradução concluída")
+        
+        # Verifica arquivo de log
+        assert os.path.exists(self.log_file)
+        
+        with open(self.log_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Verifica se todas as mensagens estão presentes
+        assert 'Iniciando tradução' in content
+        assert 'Fragmentando capítulo' in content
+        assert 'Traduzindo chunk' in content
+        assert 'Rate limit atingido' in content
+        assert 'Erro na tradução' in content
+        assert 'ValueError' in content  # Traceback
+        assert 'Chunk traduzido' in content
+        assert 'Tradução concluída' in content
+        
+        # Verifica níveis de log
+        assert 'INFO' in content
+        assert 'DEBUG' in content
+        assert 'WARNING' in content
+        assert 'ERROR' in content
+    
+    def test_logging_performance(self):
+        """Testa performance do sistema de logging."""
+        import time
+        
+        setup_logging(
+            log_file=self.log_file,
+            level=logging.INFO,
+            show_debug=False
+        )
+        
+        logger = get_logger("performance.test")
+        
+        # Mede tempo para muitas mensagens
+        start_time = time.time()
+        
+        for i in range(1000):
+            logger.info(f"Performance test message {i}")
+        
+        end_time = time.time()
+        elapsed = end_time - start_time
+        
+        # Deve ser relativamente rápido (< 1 segundo para 1000 mensagens)
+        assert elapsed < 1.0
+        
+        # Verifica se todas as mensagens foram escritas
+        with open(self.log_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        message_count = content.count('Performance test message')
+        assert message_count == 1000
+    
+    def test_logging_thread_safety(self):
+        """Testa thread safety do sistema de logging."""
+        import threading
+        import time
+        
+        setup_logging(log_file=self.log_file, level=logging.INFO)
+        
+        def worker_function(worker_id):
+            logger = get_logger(f"worker.{worker_id}")
+            
+            for i in range(100):
+                logger.info(f"Worker {worker_id} - Message {i}")
+                time.sleep(0.001)  # Pequeno delay
+        
+        # Cria múltiplas threads
+        threads = []
+        for i in range(5):
+            thread = threading.Thread(target=worker_function, args=(i,))
+            threads.append(thread)
+            thread.start()
+        
+        # Aguarda conclusão
+        for thread in threads:
+            thread.join()
+        
+        # Verifica integridade do arquivo
+        with open(self.log_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Deve conter mensagens de todos os workers
+        for worker_id in range(5):
+            assert f'Worker {worker_id}' in content
+        
+        # Conta total de mensagens (5 workers × 100 mensagens)
+        total_messages = content.count('Message')
+        assert total_messages == 500
