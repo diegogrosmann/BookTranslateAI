@@ -187,7 +187,7 @@ class ChapterWorker:
             
             # Salva o capítulo no arquivo de saída
             logger.debug(f"Worker {self.worker_id}: Salvando capítulo no arquivo de saída...")
-            self.output_manager.append_chapter(chapter_title, full_translated_content)
+            self.output_manager.append_chapter(chapter_title, full_translated_content, chapter_id)
             logger.debug(f"Worker {self.worker_id}: Capítulo salvo com sucesso")
             
             # Marca capítulo como completado

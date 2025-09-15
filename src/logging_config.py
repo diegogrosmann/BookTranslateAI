@@ -150,7 +150,24 @@ def setup_logging(
     logging.getLogger('urllib3').setLevel(logging.WARNING)
     logging.getLogger('httpx').setLevel(logging.WARNING)
     logging.getLogger('httpcore').setLevel(logging.WARNING)
-    logging.getLogger('litellm').setLevel(logging.WARNING)
+    
+    # Configuração específica para LiteLLM
+    litellm_level = logging.WARNING if numeric_level >= logging.WARNING else logging.INFO
+    logging.getLogger('litellm').setLevel(litellm_level)
+    logging.getLogger('LiteLLM').setLevel(litellm_level)
+    
+    # Configuração adicional para controlar o verbose do LiteLLM
+    try:
+        import litellm
+        if numeric_level >= logging.WARNING:
+            litellm.set_verbose = False
+            # Força nível de log interno do LiteLLM
+            os.environ['LITELLM_LOG'] = 'WARNING'
+        else:
+            litellm.set_verbose = True
+            os.environ['LITELLM_LOG'] = 'INFO'
+    except ImportError:
+        pass
     
     # Log inicial
     logger = logging.getLogger(__name__)

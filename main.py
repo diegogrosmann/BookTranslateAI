@@ -27,6 +27,7 @@ from src.chunker import TextChunker
 from src.translator import TranslationClient, TranslationConfig
 from src.progress import ProgressManager, OutputManager
 from src.parallel import ParallelProcessor
+from src.chapter_manager import ChapterFileManager
 from src.logging_config import setup_logging, get_log_file_path, progress_logger
 
 
@@ -179,6 +180,12 @@ class ProgressDisplay:
               help='Apenas testa conexão com o modelo e sai')
 @click.option('--list-models', is_flag=True,
               help='Lista modelos disponíveis e sai')
+@click.option('--save-chapters-separately', is_flag=True,
+              help='Salva cada capítulo em arquivo separado antes de consolidar')
+@click.option('--output-dir', type=click.Path(),
+              help='Diretório de saída para capítulos separados (padrão: mesmo dir do arquivo final)')
+@click.option('--keep-chapter-files/--cleanup-chapter-files', default=True,
+              help='Manter arquivos de capítulos individuais após consolidação')
 def main(
     input_file: str,
     output_file: str,
@@ -197,7 +204,10 @@ def main(
     log_file: Optional[str],
     clean_terminal: bool,
     test_connection: bool,
-    list_models: bool
+    list_models: bool,
+    save_chapters_separately: bool,
+    output_dir: Optional[str],
+    keep_chapter_files: bool
 ):
     """
     Tradutor de Livros - Traduz EPUB e PDF usando IA.
@@ -323,7 +333,10 @@ def main(
         max_workers=max_workers,
         rate_limit=rate_limit,
         format_override=format_override,
-        resume=resume
+        resume=resume,
+        save_chapters_separately=save_chapters_separately,
+        output_dir=output_dir,
+        keep_chapter_files=keep_chapter_files
     ))
 
 
@@ -337,7 +350,10 @@ async def translate_book(
     max_workers: int,
     rate_limit: float,
     format_override: Optional[str],
-    resume: bool
+    resume: bool,
+    save_chapters_separately: bool = False,
+    output_dir: Optional[str] = None,
+    keep_chapter_files: bool = True
 ):
     """Função principal de tradução."""
     
@@ -363,9 +379,36 @@ async def translate_book(
         progress_manager = ProgressManager(progress_file)
         logger.debug("ProgressManager criado")
         
-        output_manager = OutputManager(output_file)
+        # Configura chapter manager se necessário
+        chapter_manager = None
+        if save_chapters_separately:
+            # Define diretório de saída
+            if output_dir:
+                chapters_output_dir = output_dir
+            else:
+                chapters_output_dir = os.path.dirname(output_file) or "."
+            
+            # Título do livro para nomeação
+            book_title = Path(input_file).stem
+            
+            chapter_manager = ChapterFileManager(chapters_output_dir, book_title)
+            logger.info(f"ChapterFileManager criado - Diretório: {chapters_output_dir}")
+            console.print(f"📁 [cyan]Capítulos serão salvos separadamente em: {chapter_manager.chapters_dir}[/cyan]")
+        
+        # Título e autor do livro para documentos
+        book_title = Path(input_file).stem
+        book_author = "Autor Desconhecido"  # Poderia ser extraído dos metadados se disponível
+        
+        output_manager = OutputManager(
+            output_file, 
+            chapter_manager,
+            generate_documents=True,  # Sempre gerar documentos
+            book_title=book_title,
+            book_author=book_author
+        )
         logger.debug(f"OutputManager criado para: {output_file}")
         logger.info("Gerenciadores configurados com sucesso")
+        console.print(f"📚 [green]Documentos EPUB e PDF serão gerados automaticamente[/green]")
         
         # Tenta carregar progresso existente
         logger.info("=== VERIFICANDO PROGRESSO EXISTENTE ===")
@@ -533,6 +576,27 @@ async def translate_book(
             
             # Para display de progresso
             progress_display.stop_progress()
+            
+            # Consolida capítulos se necessário
+            if save_chapters_separately:
+                logger.info("=== CONSOLIDANDO CAPÍTULOS ===")
+                console.print(f"\n📚 [cyan]Consolidando capítulos em arquivo único...[/cyan]")
+                
+                success = output_manager.consolidate_chapters_if_needed()
+                if success:
+                    # Mostra status dos capítulos
+                    if chapter_manager:
+                        status = chapter_manager.get_status()
+                        console.print(f"✓ [green]{status['completed_chapters']} capítulos consolidados[/green]")
+                        console.print(f"📁 [blue]Capítulos individuais em: {status['chapters_dir']}[/blue]")
+                        
+                        # Limpeza de arquivos se solicitado
+                        if not keep_chapter_files:
+                            console.print(f"🧹 [yellow]Removendo arquivos de capítulos individuais...[/yellow]")
+                            chapter_manager.cleanup_temp_files(keep_chapters=False)
+                            console.print(f"✓ [green]Arquivos temporários removidos[/green]")
+                else:
+                    console.print(f"⚠ [yellow]Erro durante consolidação - arquivo de saída pode estar incompleto[/yellow]")
             
             # Mostra estatísticas finais
             logger.info("=== TRADUÇÃO CONCLUÍDA ===")

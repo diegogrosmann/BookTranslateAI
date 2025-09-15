@@ -12,7 +12,12 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
-
+try:
+    from .document_generator import generate_documents
+    DOCUMENT_GENERATOR_AVAILABLE = True
+except ImportError:
+    DOCUMENT_GENERATOR_AVAILABLE = False
+    logging.warning("document_generator não disponível. Geração de EPUB/PDF desabilitada.")
 
 logger = logging.getLogger(__name__)
 
@@ -494,15 +499,25 @@ class ProgressManager:
 class OutputManager:
     """Gerenciador de saída Markdown thread-safe."""
     
-    def __init__(self, output_file: str):
+    def __init__(self, output_file: str, chapter_manager=None, generate_documents: bool = True,
+                 book_title: str = "Livro Traduzido", book_author: str = "Autor Desconhecido"):
         """
         Inicializa o gerenciador de saída.
         
         Args:
             output_file: Caminho para o arquivo de saída Markdown
+            chapter_manager: Gerenciador de capítulos individuais (opcional)
+            generate_documents: Se deve gerar EPUB e PDF automaticamente
+            book_title: Título do livro para documentos
+            book_author: Autor do livro para documentos
         """
         self.output_file = output_file
+        self.chapter_manager = chapter_manager
+        self.generate_documents = generate_documents
+        self.book_title = book_title
+        self.book_author = book_author
         self._lock = threading.Lock()
+        self._chapter_counter = 0
         
         # Cria diretório se não existir
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
@@ -525,16 +540,46 @@ class OutputManager:
             with open(self.output_file, 'w', encoding='utf-8') as f:
                 f.write(header)
     
-    def append_chapter(self, chapter_title: str, translated_content: str) -> None:
+    def append_chapter(self, chapter_title: str, translated_content: str, chapter_id: str = None) -> None:
         """
         Adiciona um capítulo traduzido ao arquivo de saída.
         
         Args:
             chapter_title: Título do capítulo
             translated_content: Conteúdo traduzido
+            chapter_id: ID do capítulo (usado quando salvando separadamente)
         """
         with self._lock:
-            chapter_md = f"""
+            # Se tem chapter_manager, salva separadamente
+            if self.chapter_manager and chapter_id:
+                self._chapter_counter += 1
+                # Registra o capítulo se ainda não foi registrado
+                if chapter_id not in self.chapter_manager.chapter_files:
+                    self.chapter_manager.register_chapter(
+                        self._chapter_counter, chapter_id, chapter_title
+                    )
+                
+                # Salva capítulo individual
+                success = self.chapter_manager.save_chapter(chapter_id, translated_content)
+                if success:
+                    logger.info(f"Capítulo salvo separadamente: {chapter_title}")
+                else:
+                    logger.error(f"Erro ao salvar capítulo separadamente: {chapter_title}")
+                    # Fallback para método tradicional
+                    self._append_traditional(chapter_title, translated_content)
+            else:
+                # Método tradicional
+                self._append_traditional(chapter_title, translated_content)
+    
+    def _append_traditional(self, chapter_title: str, translated_content: str) -> None:
+        """
+        Adiciona capítulo usando método tradicional (arquivo único).
+        
+        Args:
+            chapter_title: Título do capítulo
+            translated_content: Conteúdo traduzido
+        """
+        chapter_md = f"""
 ## {chapter_title}
 
 {translated_content}
@@ -542,10 +587,65 @@ class OutputManager:
 ---
 
 """
-            with open(self.output_file, 'a', encoding='utf-8') as f:
-                f.write(chapter_md)
+        with open(self.output_file, 'a', encoding='utf-8') as f:
+            f.write(chapter_md)
+        
+        logger.info(f"Capítulo adicionado ao arquivo: {chapter_title}")
+    
+    def consolidate_chapters_if_needed(self) -> bool:
+        """
+        Consolida capítulos separados em arquivo único se necessário.
+        
+        Returns:
+            True se consolidação foi feita ou não era necessária
+        """
+        if not self.chapter_manager:
+            success = True  # Não há nada para consolidar
+        else:
+            logger.info("Consolidando capítulos em arquivo único...")
+            success = self.chapter_manager.consolidate_chapters(self.output_file)
             
-            logger.info(f"Capítulo adicionado ao arquivo: {chapter_title}")
+            if success:
+                logger.info(f"Capítulos consolidados com sucesso em: {self.output_file}")
+            else:
+                logger.error("Erro durante consolidação dos capítulos")
+                return success
+        
+        # Gera documentos EPUB e PDF se habilitado
+        if self.generate_documents and success and DOCUMENT_GENERATOR_AVAILABLE:
+            self._generate_final_documents()
+        
+        return success
+    
+    def _generate_final_documents(self) -> None:
+        """Gera documentos EPUB e PDF finais."""
+        try:
+            if not os.path.exists(self.output_file):
+                logger.warning("Arquivo de saída não existe, pulando geração de documentos")
+                return
+            
+            # Determina diretório e nome base para os documentos
+            output_dir = os.path.dirname(self.output_file)
+            base_filename = os.path.splitext(os.path.basename(self.output_file))[0]
+            
+            logger.info("Gerando documentos EPUB e PDF...")
+            generated_files = generate_documents(
+                content_file=self.output_file,
+                output_dir=output_dir,
+                base_filename=base_filename,
+                title=self.book_title,
+                author=self.book_author
+            )
+            
+            if generated_files:
+                logger.info("Documentos gerados com sucesso:")
+                for file_path in generated_files:
+                    logger.info(f"  - {file_path}")
+            else:
+                logger.warning("Nenhum documento foi gerado")
+                
+        except Exception as e:
+            logger.error(f"Erro ao gerar documentos finais: {e}")
     
     def file_exists(self) -> bool:
         """Verifica se o arquivo de saída já existe."""

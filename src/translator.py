@@ -48,6 +48,13 @@ class TranslationClient:
         litellm.set_verbose = False  # Evita logs desnecessários no terminal
         litellm.drop_params = True   # Ignora parâmetros não suportados pelos modelos
         
+        # Configuração adicional para suprimir logs verbosos
+        import logging
+        current_level = logging.getLogger().getEffectiveLevel()
+        if current_level >= logging.WARNING:
+            litellm.set_verbose = False
+            os.environ['LITELLM_LOG'] = 'WARNING'
+        
         logger.info(f"Cliente de tradução inicializado para modelo: {self.config.model}")
     
     def _set_api_key(self, api_key: str) -> None:
