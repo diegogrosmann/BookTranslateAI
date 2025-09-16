@@ -4,7 +4,7 @@ type: software
 title: "BookTranslateAI: AI-Powered Book Translation Tool"
 abstract: "An intelligent book translation tool that uses AI to translate EPUB and PDF files while preserving formatting, structure, and context. Features intelligent text chunking, parallel processing, and support for multiple AI providers."
 authors:
-  - family-names: "Grossmann"
+  - family-names: "Grosmann"
     given-names: "Diego"
 version: "1.0.0"
 date-released: "2025-01-16"
@@ -29,7 +29,7 @@ preferred-citation:
   type: software
   title: "BookTranslateAI: AI-Powered Book Translation Tool"
   authors:
-    - family-names: "Grossmann"
+    - family-names: "Grosmann"
       given-names: "Diego"
   version: "1.0.0"
   date-released: "2025-01-16"

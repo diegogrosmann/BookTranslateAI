@@ -10,10 +10,10 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
-    {name = "Diego Grossmann", email = "diego@example.com"}
+    {name = "Diego Grosmann", email = "diego@example.com"}
 ]
 maintainers = [
-    {name = "Diego Grossmann", email = "diego@example.com"}
+    {name = "Diego Grosmann", email = "diego@example.com"}
 ]
 keywords = [
     "translation",
