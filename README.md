@@ -14,7 +14,7 @@ BookTranslateAI is a complete system for automatic translation of books in EPUB 
 ```bash
 --max-workers 4          # Number of parallel workers
 --rate-limit 2.0         # Requests per second (0 = no limit)
-```s using AI models through the LiteLLM library. Supports multiple AI providers, parallel processing, and resuming interrupted translations.
+```
 
 ## ✨ Features
 
