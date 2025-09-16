@@ -1,0 +1,39 @@
+# Code Owners for BookTranslateAI
+# This file defines individuals or teams that are responsible
+# for code in this repository.
+
+# Global ownership
+* @diegogrosmann
+
+# Core source code
+/src/ @diegogrosmann
+
+# Tests
+/tests/ @diegogrosmann
+
+# Documentation
+/docs/ @diegogrosmann
+*.md @diegogrosmann
+/README.md @diegogrosmann
+/CONTRIBUTING.md @diegogrosmann
+/CHANGELOG.md @diegogrosmann
+
+# Configuration files
+/pyproject.toml @diegogrosmann
+/.github/ @diegogrosmann
+/.pre-commit-config.yaml @diegogrosmann
+/requirements.txt @diegogrosmann
+
+# CI/CD
+/.github/workflows/ @diegogrosmann
+
+# Security and legal
+/LICENSE @diegogrosmann
+/CITATION.cff @diegogrosmann
+/.gitignore @diegogrosmann
+
+# Core modules (require extra review)
+/src/translator.py @diegogrosmann
+/src/chunker.py @diegogrosmann
+/src/extractors.py @diegogrosmann
+/main.py @diegogrosmann

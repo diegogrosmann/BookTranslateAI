@@ -1,47 +1,47 @@
-"""BookTranslateAI - Tradutor Automático de Livros.
+"""BookTranslateAI - Automatic Book Translation System.
 
-Este pacote fornece um sistema completo para tradução automática de livros 
-em formato EPUB e PDF usando modelos de IA através da biblioteca LiteLLM.
+This package provides a complete system for automatic translation of books
+in EPUB and PDF formats using AI models through the LiteLLM library.
 
-O sistema oferece:
-    - Suporte a múltiplos provedores de IA (OpenAI, Anthropic, Google, etc.)
-    - Processamento paralelo para melhor performance
-    - Fragmentação inteligente de texto com overlap
-    - Sistema de retomada para traduções interrompidas
-    - Geração automática de documentos EPUB e PDF
-    - Logging detalhado e controle de progresso
-    - Interface de linha de comando amigável
+The system offers:
+    - Support for multiple AI providers (OpenAI, Anthropic, Google, etc.)
+    - Parallel processing for improved performance
+    - Intelligent text chunking with overlap
+    - Resume system for interrupted translations
+    - Automatic generation of EPUB and PDF documents
+    - Detailed logging and progress control
+    - User-friendly command-line interface
 
-Módulos principais:
-    extractors: Extração de conteúdo de arquivos EPUB/PDF
-    chunker: Fragmentação inteligente de texto
-    translator: Cliente de tradução usando LiteLLM
-    parallel: Processamento paralelo e coordenação
-    progress: Controle de progresso e persistência
-    chapter_manager: Gerenciamento de capítulos individuais
-    document_generator: Geração de documentos finais
-    logging_config: Sistema de logging configurável
+Main modules:
+    extractors: Content extraction from EPUB/PDF files
+    chunker: Intelligent text fragmentation
+    translator: Translation client using LiteLLM
+    parallel: Parallel processing and coordination
+    progress: Progress control and persistence
+    chapter_manager: Individual chapter management
+    document_generator: Final document generation
+    logging_config: Configurable logging system
 
 Example:
-    Uso básico do sistema:
-    
+    Basic system usage:
+
     >>> from src.extractors import ContentExtractorFactory
     >>> from src.translator import TranslationClient, TranslationConfig
-    >>> 
-    >>> # Extrai conteúdo do livro
+    >>>
+    >>> # Extract book content
     >>> extractor = ContentExtractorFactory.create_extractor("book.epub")
     >>> chapters = extractor.extract_content("book.epub")
-    >>> 
-    >>> # Configura tradutor
+    >>>
+    >>> # Configure translator
     >>> config = TranslationConfig(model="gpt-3.5-turbo", target_language="pt-BR")
     >>> translator = TranslationClient(config)
-    >>> 
-    >>> # Traduz capítulo
+    >>>
+    >>> # Translate chapter
     >>> translated = await translator.translate_text(chapters[0]['content'])
 
 Note:
-    Este sistema requer uma chave de API válida para os provedores de IA.
-    Consulte a documentação para instruções de configuração.
+    This system requires a valid API key for AI providers.
+    Consult the documentation for configuration instructions.
 """
 
 __version__ = "1.0.0"
@@ -51,27 +51,27 @@ __license__ = "MIT"
 __url__ = "https://github.com/diegogrosmann/BookTranslateAI"
 
 # Exposição das classes principais para facilitar importação
-from .extractors import ContentExtractorFactory, EPUBExtractor, PDFExtractor
-from .translator import TranslationClient, TranslationConfig
-from .chunker import TextChunker, TextChunk
-from .progress import ProgressManager, OutputManager
-from .parallel import ParallelProcessor
-from .chapter_manager import ChapterFileManager
-from .document_generator import DocumentGenerator, EpubGenerator, PdfGenerator
+from src.chapter_manager import ChapterFileManager
+from src.chunker import TextChunk, TextChunker
+from src.document_generator import DocumentGenerator, EpubGenerator, PdfGenerator
+from src.extractors import ContentExtractorFactory, EPUBExtractor, PDFExtractor
+from src.parallel import ParallelProcessor
+from src.progress import OutputManager, ProgressManager
+from src.translator import TranslationClient, TranslationConfig
 
 __all__ = [
-    'ContentExtractorFactory',
-    'EPUBExtractor', 
-    'PDFExtractor',
-    'TranslationClient',
-    'TranslationConfig',
-    'TextChunker',
-    'TextChunk',
-    'ProgressManager',
-    'OutputManager',
-    'ParallelProcessor',
-    'ChapterFileManager',
-    'DocumentGenerator',
-    'EpubGenerator',
-    'PdfGenerator'
+    "ChapterFileManager",
+    "ContentExtractorFactory",
+    "DocumentGenerator",
+    "EPUBExtractor",
+    "EpubGenerator",
+    "OutputManager",
+    "PDFExtractor",
+    "ParallelProcessor",
+    "PdfGenerator",
+    "ProgressManager",
+    "TextChunk",
+    "TextChunker",
+    "TranslationClient",
+    "TranslationConfig",
 ]

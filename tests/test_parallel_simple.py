@@ -1,22 +1,20 @@
 """
-Testes simples para o módulo parallel.py  
-Testando apenas as classes que realmente existem.
+Simple tests for the parallel.py module
+Testing only classes that actually exist.
 """
-import pytest
-import asyncio
-from unittest.mock import Mock, patch, AsyncMock
-from dataclasses import asdict
 
-from parallel import WorkerStats, RateLimiter
+import pytest
+
+from src.parallel import RateLimiter, WorkerStats
 
 
 class TestWorkerStats:
-    """Testes para a classe WorkerStats."""
-    
+    """Tests for the WorkerStats class."""
+
     def test_worker_stats_creation(self):
-        """Testa criação de estatísticas de worker."""
+        """Test creation of worker statistics."""
         stats = WorkerStats(worker_id=1)
-        
+
         assert stats.worker_id == 1
         assert stats.chapters_processed == 0
         assert stats.chunks_processed == 0
@@ -26,23 +24,23 @@ class TestWorkerStats:
 
 
 class TestRateLimiter:
-    """Testes para a classe RateLimiter."""
-    
+    """Tests for the RateLimiter class."""
+
     def test_rate_limiter_creation(self):
-        """Testa criação do rate limiter."""
+        """Test creation of rate limiter."""
         limiter = RateLimiter(calls_per_second=2.0)
-        
+
         assert limiter.calls_per_second == 2.0
         assert limiter.min_interval == 0.5  # 1/2
         assert limiter.last_call_time == 0.0
-    
+
     @pytest.mark.asyncio
     async def test_rate_limiter_acquire(self):
-        """Testa aquisição básica do rate limiter."""
-        limiter = RateLimiter(calls_per_second=10.0)  # Rápido para teste
-        
-        # Primeira chamada não deve ter delay significativo
+        """Test basic acquisition of rate limiter."""
+        limiter = RateLimiter(calls_per_second=10.0)  # Fast for testing
+
+        # First call should not have significant delay
         await limiter.acquire()
-        
-        # Verifica que last_call_time foi atualizado
+
+        # Verify that last_call_time was updated
         assert limiter.last_call_time > 0

@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "BookTranslateAI: AI-Powered Book Translation Tool"
+abstract: "An intelligent book translation tool that uses AI to translate EPUB and PDF files while preserving formatting, structure, and context. Features intelligent text chunking, parallel processing, and support for multiple AI providers."
+authors:
+  - family-names: "Grossmann"
+    given-names: "Diego"
+version: "1.0.0"
+date-released: "2025-01-16"
+license: MIT
+url: "https://github.com/diegogrosmann/BookTranslateAI"
+repository-code: "https://github.com/diegogrosmann/BookTranslateAI"
+keywords:
+  - translation
+  - artificial-intelligence
+  - epub
+  - pdf
+  - books
+  - natural-language-processing
+  - machine-translation
+  - llm
+  - document-processing
+identifiers:
+  - type: url
+    value: "https://github.com/diegogrosmann/BookTranslateAI"
+    description: "GitHub repository"
+preferred-citation:
+  type: software
+  title: "BookTranslateAI: AI-Powered Book Translation Tool"
+  authors:
+    - family-names: "Grossmann"
+      given-names: "Diego"
+  version: "1.0.0"
+  date-released: "2025-01-16"
+  license: MIT
+  url: "https://github.com/diegogrosmann/BookTranslateAI"

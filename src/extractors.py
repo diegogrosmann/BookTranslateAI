@@ -1,415 +1,427 @@
-"""Extratores de Conteúdo para Múltiplos Formatos.
+"""Content Extractors for Multiple Formats.
 
-Este módulo fornece extratores especializados para diferentes formatos
-de arquivo, permitindo que o sistema de tradução processe livros em
-EPUB, PDF e potencialmente outros formatos.
+This module provides specialized extractors for different file formats,
+allowing the translation system to process books in EPUB, PDF and
+potentially other formats.
 
-O sistema de extratores:
-    - Arquitetura baseada em Factory Pattern
-    - Detecção automática de formato
-    - Extração estruturada de capítulos/seções
-    - Limpeza e normalização de texto
-    - Tratamento de metadados
-    - Logging detalhado do processo
+The extractor system features:
+    - Architecture based on Factory Pattern
+    - Automatic format detection
+    - Structured extraction of chapters/sections
+    - Text cleaning and normalization
+    - Metadata handling
+    - Detailed logging of the process
 
 Classes:
-    ContentExtractor: Classe base abstrata
-    EPUBExtractor: Extrator para arquivos EPUB
-    PDFExtractor: Extrator para arquivos PDF  
-    ContentExtractorFactory: Factory para criar extratores
+    ContentExtractor: Abstract base class
+    EPUBExtractor: Extractor for EPUB files
+    PDFExtractor: Extractor for PDF files
+    ContentExtractorFactory: Factory to create extractors
 
 Example:
-    Uso básico dos extratores:
-    
+    Basic extractor usage:
+
     >>> from extractors import ContentExtractorFactory
-    >>> 
-    >>> # Detecção automática do formato
+    >>>
+    >>> # Automatic format detection
     >>> extractor = ContentExtractorFactory.create_extractor("book.epub")
     >>> chapters = extractor.extract_content("book.epub")
-    >>> 
+    >>>
     >>> for chapter in chapters:
-    ...     print(f"Capítulo: {chapter['title']}")
-    ...     print(f"Tamanho: {len(chapter['content'])} caracteres")
+    ...     print(f"Chapter: {chapter['title']}")
+    ...     print(f"Size: {len(chapter['content'])} characters")
 
 Note:
-    Cada extrator retorna dados no mesmo formato padronizado,
-    facilitando processamento posterior independente da fonte.
+    Each extractor returns data in the same standardized format,
+    facilitating subsequent processing independent of the source.
 """
-import os
+
 import logging
+import os
 from abc import ABC, abstractmethod
-from typing import List, Dict, Optional, Tuple
 from pathlib import Path
+from typing import ClassVar
 
 import ebooklib
-from ebooklib import epub
-from bs4 import BeautifulSoup
 import PyPDF2
-
+from bs4 import BeautifulSoup
+from ebooklib import epub
 
 logger = logging.getLogger(__name__)
 
 
 class ContentExtractor(ABC):
-    """Classe base abstrata para extratores de conteúdo.
-    
-    Define a interface comum que todos os extratores devem implementar.
-    Garante consistência no formato de saída independente do formato
-    de arquivo de entrada.
-    
+    """Abstract base class for content extractors.
+
+    Defines the common interface that all extractors must implement.
+    Ensures consistency in output format regardless of input file format.
+
     Methods:
-        extract_content: Método principal para extração (abstrato)
-        detect_format: Detecta formato de arquivo (estático)
+        extract_content: Main extraction method (abstract)
+        detect_format: Detects file format (static)
     """
-    
+
     @abstractmethod
-    def extract_content(self, file_path: str) -> List[Dict[str, str]]:
-        """Extrai conteúdo estruturado do arquivo.
-        
-        Este método deve ser implementado por cada extrator específico
-        e retornar uma lista padronizada de capítulos/seções.
-        
+    def extract_content(self, file_path: str) -> list[dict[str, str]]:
+        """Extract structured content from file.
+
+        This method must be implemented by each specific extractor
+        and return a standardized list of chapters/sections.
+
         Args:
-            file_path: Caminho para o arquivo a ser processado
-            
+            file_path: Path to the file to be processed
+
         Returns:
-            Lista de dicionários com estrutura padrão:
-            - 'title': Título do capítulo/seção
-            - 'content': Conteúdo textual limpo
-            - 'id': Identificador único (opcional)
-            
+            List of dictionaries with standard structure:
+            - 'title': Chapter/section title
+            - 'content': Clean textual content
+            - 'id': Unique identifier (optional)
+
         Raises:
-            FileNotFoundError: Se arquivo não existe
-            Exception: Para erros específicos de formato
-            
+            FileNotFoundError: If file does not exist
+            Exception: For format-specific errors
+
         Example:
             >>> extractor = SomeExtractor()
             >>> chapters = extractor.extract_content("book.ext")
-            >>> print(chapters[0]['title'])  # "Capítulo 1"
+            >>> print(chapters[0]['title'])  # "Chapter 1"
         """
         pass
-    
+
     @staticmethod
     def detect_format(file_path: str) -> str:
-        """Detecta formato de arquivo baseado na extensão.
-        
+        """Detect file format based on extension.
+
         Args:
-            file_path: Caminho para o arquivo
-            
+            file_path: Path to the file
+
         Returns:
-            String identificando o formato ('epub', 'pdf', 'unknown')
-            
+            String identifying the format ('epub', 'pdf', 'unknown')
+
         Example:
             >>> fmt = ContentExtractor.detect_format("book.epub")
             >>> print(fmt)  # "epub"
         """
         extension = Path(file_path).suffix.lower()
-        if extension == '.epub':
-            return 'epub'
-        elif extension == '.pdf':
-            return 'pdf'
+        if extension == ".epub":
+            return "epub"
+        elif extension == ".pdf":
+            return "pdf"
         else:
-            raise ValueError(f"Formato não suportado: {extension}")
+            raise ValueError(f"Unsupported format: {extension}")
 
 
 class EPUBExtractor(ContentExtractor):
-    """Extrator especializado para arquivos EPUB.
-    
-    Implementa extração completa de conteúdo de arquivos EPUB,
-    incluindo processamento de HTML, extração de metadados
-    e limpeza de texto para tradução.
-    
-    Recursos:
-    - Processamento de todos os documentos HTML do EPUB
-    - Extração automática de títulos de seções
-    - Limpeza e normalização de texto
-    - Tratamento de encoding e caracteres especiais
-    - Logging detalhado do processo de extração
-    
+    """Specialized extractor for EPUB files.
+
+    Implements complete content extraction from EPUB files,
+    including HTML processing, metadata extraction
+    and text cleaning for translation.
+
+    Features:
+    - Processing of all HTML documents in the EPUB
+    - Automatic extraction of section titles
+    - Text cleaning and normalization
+    - Encoding and special character handling
+    - Detailed logging of the extraction process
+
     Note:
-        Este extrator depende das bibliotecas 'ebooklib' e 'beautifulsoup4'
-        para processamento completo de arquivos EPUB.
+        This extractor depends on 'ebooklib' and 'beautifulsoup4'
+        libraries for complete EPUB file processing.
     """
-    
-    def extract_content(self, file_path: str) -> List[Dict[str, str]]:
+
+    def extract_content(self, file_path: str) -> list[dict[str, str]]:
         """
-        Extrai capítulos de um arquivo EPUB.
-        
+        Extract chapters from an EPUB file.
+
         Args:
-            file_path: Caminho para o arquivo EPUB
-            
+            file_path: Path to the EPUB file
+
         Returns:
-            Lista de dicionários com informações dos capítulos
+            List of dictionaries with chapter information
         """
-        logger.info(f"=== EXTRAINDO CONTEÚDO EPUB ===")
-        logger.info(f"Arquivo: {file_path}")
-        
+        logger.info("=== EXTRACTING EPUB CONTENT ===")
+        logger.info(f"File: {file_path}")
+
         if not os.path.exists(file_path):
-            logger.error(f"Arquivo não encontrado: {file_path}")
-            raise FileNotFoundError(f"Arquivo não encontrado: {file_path}")
-        
+            logger.error(f"File not found: {file_path}")
+            raise FileNotFoundError(f"File not found: {file_path}")
+
         file_size = os.path.getsize(file_path)
-        logger.info(f"Tamanho do arquivo: {file_size:,} bytes")
-        
+        logger.info(f"File size: {file_size:,} bytes")
+
         try:
-            logger.debug("Abrindo arquivo EPUB...")
+            logger.debug("Opening EPUB file...")
             book = epub.read_epub(file_path)
-            
-            # Obtém metadados
-            title = book.get_metadata('DC', 'title')
-            creator = book.get_metadata('DC', 'creator')
+
+            # Get metadata
+            title = book.get_metadata("DC", "title")
+            creator = book.get_metadata("DC", "creator")
             if title:
-                logger.info(f"Título do livro: {title[0][0] if title else 'N/A'}")
+                logger.info(f"Book title: {title[0][0] if title else 'N/A'}")
             if creator:
-                logger.info(f"Autor: {creator[0][0] if creator else 'N/A'}")
-            
+                logger.info(f"Author: {creator[0][0] if creator else 'N/A'}")
+
             chapters = []
             total_items = len(list(book.get_items()))
             document_items = 0
-            
-            logger.info(f"Total de itens no EPUB: {total_items}")
-            
-            # Pega todos os documentos HTML do EPUB
-            for i, item in enumerate(book.get_items()):
+
+            logger.info(f"Total items in EPUB: {total_items}")
+
+            # Get all HTML documents from the EPUB
+            for _i, item in enumerate(book.get_items()):
                 if item.get_type() == ebooklib.ITEM_DOCUMENT:
                     document_items += 1
                     item_name = item.get_name()
                     item_id = item.get_id()
-                    
-                    logger.debug(f"Processando documento {document_items}: {item_name} (ID: {item_id})")
-                    
-                    # Extrai o texto HTML
+
+                    logger.debug(
+                        f"Processing document {document_items}: {item_name} (ID: {item_id})"
+                    )
+
+                    # Extract HTML text
                     try:
-                        content = item.get_content().decode('utf-8')
-                        logger.debug(f"HTML extraído: {len(content):,} caracteres")
+                        content = item.get_content().decode("utf-8")
+                        logger.debug(f"HTML extracted: {len(content):,} characters")
                     except Exception as decode_error:
-                        logger.warning(f"Erro ao decodificar item {item_name}: {decode_error}")
+                        logger.warning(
+                            f"Error decoding item {item_name}: {decode_error}"
+                        )
                         continue
-                    
-                    # Parse HTML para extrair texto limpo
-                    soup = BeautifulSoup(content, 'html.parser')
-                    
-                    # Remove scripts e estilos
+
+                    # Parse HTML to extract clean text
+                    soup = BeautifulSoup(content, "html.parser")
+
+                    # Remove scripts and styles
                     scripts_removed = len(soup(["script", "style"]))
                     for script in soup(["script", "style"]):
                         script.decompose()
                     if scripts_removed > 0:
-                        logger.debug(f"Removidos {scripts_removed} elementos script/style")
-                    
-                    # Extrai texto limpo
+                        logger.debug(f"Removed {scripts_removed} script/style elements")
+
+                    # Extract clean text
                     text = soup.get_text()
                     raw_text_length = len(text)
-                    
-                    # Limpa e normaliza o texto
+
+                    # Clean and normalize text
                     text = self._clean_text(text)
                     clean_text_length = len(text)
-                    
-                    logger.debug(f"Texto processado: {raw_text_length:,} → {clean_text_length:,} caracteres")
-                    
-                    if text.strip():  # Só adiciona se tiver conteúdo
-                        # Tenta extrair título do primeiro h1, h2, etc., ou usa o nome do arquivo
+
+                    logger.debug(
+                        f"Text processed: {raw_text_length:,} → {clean_text_length:,} characters"
+                    )
+
+                    if text.strip():  # Only add if there's content
+                        # Try to extract title from first h1, h2, etc., or use file name
                         title = self._extract_title(soup) or item.get_name()
-                        
-                        chapters.append({
-                            'title': title,
-                            'content': text,
-                            'id': item.get_id(),
-                            'file_name': item.get_name()
-                        })
-                        
-                        logger.debug(f"Capítulo adicionado: '{title}' ({clean_text_length:,} chars)")
+
+                        chapters.append(
+                            {
+                                "title": title,
+                                "content": text,
+                                "id": item.get_id(),
+                                "file_name": item.get_name(),
+                            }
+                        )
+
+                        logger.debug(
+                            f"Chapter added: '{title}' ({clean_text_length:,} chars)"
+                        )
                     else:
-                        logger.debug(f"Item {item_name} ignorado - sem conteúdo texto")
-            
-            total_chars = sum(len(ch['content']) for ch in chapters)
-            logger.info(f"=== EXTRAÇÃO EPUB CONCLUÍDA ===")
-            logger.info(f"Documentos processados: {document_items}")
-            logger.info(f"Capítulos extraídos: {len(chapters)}")
-            logger.info(f"Total de caracteres: {total_chars:,}")
-            
+                        logger.debug(f"Item {item_name} ignored - no text content")
+
+            total_chars = sum(len(ch["content"]) for ch in chapters)
+            logger.info("=== EPUB EXTRACTION COMPLETED ===")
+            logger.info(f"Documents processed: {document_items}")
+            logger.info(f"Chapters extracted: {len(chapters)}")
+            logger.info(f"Total characters: {total_chars:,}")
+
             if chapters:
                 avg_chars = total_chars // len(chapters)
-                logger.info(f"Média de caracteres por capítulo: {avg_chars:,}")
-            
+                logger.info(f"Average characters per chapter: {avg_chars:,}")
+
             return chapters
-            
+
         except Exception as e:
-            logger.error(f"Erro ao extrair conteúdo do EPUB {file_path}: {e}")
+            logger.error(f"Error extracting content from EPUB {file_path}: {e}")
             raise
-    
-    def _extract_title(self, soup: BeautifulSoup) -> Optional[str]:
-        """Extrai título da seção HTML."""
+
+    def _extract_title(self, soup: BeautifulSoup) -> str | None:
+        """Extract title from HTML section."""
         # Procura por tags de cabeçalho
-        for tag in ['h1', 'h2', 'h3', 'title']:
+        for tag in ["h1", "h2", "h3", "title"]:
             element = soup.find(tag)
             if element and element.get_text().strip():
                 return element.get_text().strip()
         return None
-    
+
     def _clean_text(self, text: str) -> str:
-        """Limpa e normaliza o texto extraído."""
+        """Clean and normalize extracted text."""
         # Remove múltiplas linhas em branco
-        lines = text.split('\n')
+        lines = text.split("\n")
         cleaned_lines = []
-        
+
         for line in lines:
             cleaned_line = line.strip()
             if cleaned_line:
                 cleaned_lines.append(cleaned_line)
-        
+
         # Junta com quebras de linha simples
-        return '\n'.join(cleaned_lines)
+        return "\n".join(cleaned_lines)
 
 
 class PDFExtractor(ContentExtractor):
-    """Extrator especializado para arquivos PDF.
-    
-    Implementa extração de texto de arquivos PDF página por página,
-    com limpeza e normalização adequada para processamento posterior.
-    
-    Recursos:
-    - Extração página por página
-    - Limpeza de formatação e espaçamento
-    - Filtragem de páginas vazias
-    - Tratamento de encoding de caracteres
-    - Estatísticas de processamento
-    
+    """Specialized extractor for PDF files.
+
+    Implements text extraction from PDF files page by page,
+    with proper cleaning and normalization for subsequent processing.
+
+    Features:
+    - Page-by-page extraction
+    - Formatting and spacing cleanup
+    - Empty page filtering
+    - Character encoding handling
+    - Processing statistics
+
     Note:
-        Este extrator usa PyPDF2 para leitura de arquivos PDF.
-        Arquivos com proteção ou formatação complexa podem ter
-        resultados limitados.
+        This extractor uses PyPDF2 for reading PDF files.
+        Files with protection or complex formatting may have
+        limited results.
     """
-    
-    def extract_content(self, file_path: str) -> List[Dict[str, str]]:
+
+    def extract_content(self, file_path: str) -> list[dict[str, str]]:
         """
-        Extrai páginas de um arquivo PDF.
-        
+        Extract pages from a PDF file.
+
         Args:
-            file_path: Caminho para o arquivo PDF
-            
+            file_path: Path to the PDF file
+
         Returns:
-            Lista de dicionários com informações das páginas
+            List of dictionaries with page information
         """
-        logger.info(f"=== EXTRAINDO CONTEÚDO PDF ===")
-        logger.info(f"Arquivo: {file_path}")
-        
+        logger.info("=== EXTRACTING PDF CONTENT ===")
+        logger.info(f"File: {file_path}")
+
         if not os.path.exists(file_path):
-            logger.error(f"Arquivo não encontrado: {file_path}")
-            raise FileNotFoundError(f"Arquivo não encontrado: {file_path}")
-        
+            logger.error(f"File not found: {file_path}")
+            raise FileNotFoundError(f"File not found: {file_path}")
+
         file_size = os.path.getsize(file_path)
-        logger.info(f"Tamanho do arquivo: {file_size:,} bytes")
-        
+        logger.info(f"File size: {file_size:,} bytes")
+
         try:
             pages = []
-            
-            with open(file_path, 'rb') as file:
-                logger.debug("Abrindo arquivo PDF...")
+
+            with open(file_path, "rb") as file:
+                logger.debug("Opening PDF file...")
                 pdf_reader = PyPDF2.PdfReader(file)
                 total_pages = len(pdf_reader.pages)
-                
-                logger.info(f"Total de páginas no PDF: {total_pages}")
-                
-                # Obtém metadados se disponível
+
+                logger.info(f"Total pages in PDF: {total_pages}")
+
+                # Get metadata if available
                 if pdf_reader.metadata:
                     metadata = pdf_reader.metadata
-                    if '/Title' in metadata:
-                        logger.info(f"Título do PDF: {metadata['/Title']}")
-                    if '/Author' in metadata:
-                        logger.info(f"Autor: {metadata['/Author']}")
-                    if '/Creator' in metadata:
-                        logger.debug(f"Criador: {metadata['/Creator']}")
-                
+                    if "/Title" in metadata:
+                        logger.info(f"PDF title: {metadata['/Title']}")
+                    if "/Author" in metadata:
+                        logger.info(f"Author: {metadata['/Author']}")
+                    if "/Creator" in metadata:
+                        logger.debug(f"Creator: {metadata['/Creator']}")
+
                 pages_processed = 0
                 pages_with_content = 0
                 total_chars = 0
-                
+
                 for page_num, page in enumerate(pdf_reader.pages, 1):
                     try:
-                        logger.debug(f"Processando página {page_num}/{total_pages}")
-                        
-                        # Extrai texto da página
+                        logger.debug(f"Processing page {page_num}/{total_pages}")
+
+                        # Extract text from page
                         text = page.extract_text()
                         raw_text_length = len(text) if text else 0
-                        
-                        # Limpa e normaliza o texto
+
+                        # Clean and normalize text
                         text = self._clean_text(text)
                         clean_text_length = len(text) if text else 0
-                        
-                        logger.debug(f"Página {page_num}: {raw_text_length:,} → {clean_text_length:,} caracteres")
-                        
-                        if text.strip():  # Só adiciona se tiver conteúdo
-                            pages.append({
-                                'title': f'Página {page_num}',
-                                'content': text,
-                                'page_number': page_num
-                            })
+
+                        logger.debug(
+                            f"Page {page_num}: {raw_text_length:,} → {clean_text_length:,} characters"
+                        )
+
+                        if text.strip():  # Only add if there's content
+                            pages.append(
+                                {
+                                    "title": f"Page {page_num}",
+                                    "content": text,
+                                    "page_number": str(page_num),
+                                }
+                            )
                             pages_with_content += 1
                             total_chars += clean_text_length
                         else:
-                            logger.debug(f"Página {page_num} ignorada - sem conteúdo texto")
-                        
+                            logger.debug(f"Page {page_num} ignored - no text content")
+
                         pages_processed += 1
-                    
+
                     except Exception as e:
-                        logger.warning(f"Erro ao extrair página {page_num}: {e}")
+                        logger.warning(f"Error extracting page {page_num}: {e}")
                         continue
-            
-            logger.info(f"=== EXTRAÇÃO PDF CONCLUÍDA ===")
-            logger.info(f"Páginas processadas: {pages_processed}/{total_pages}")
-            logger.info(f"Páginas com conteúdo: {pages_with_content}")
-            logger.info(f"Total de caracteres: {total_chars:,}")
-            
+
+            logger.info("=== PDF EXTRACTION COMPLETED ===")
+            logger.info(f"Pages processed: {pages_processed}/{total_pages}")
+            logger.info(f"Pages with content: {pages_with_content}")
+            logger.info(f"Total characters: {total_chars:,}")
+
             if pages_with_content > 0:
                 avg_chars = total_chars // pages_with_content
-                logger.info(f"Média de caracteres por página: {avg_chars:,}")
-            
+                logger.info(f"Average characters per page: {avg_chars:,}")
+
             return pages
-            
+
         except Exception as e:
-            logger.error(f"Erro ao extrair conteúdo do PDF {file_path}: {e}")
+            logger.error(f"Error extracting content from PDF {file_path}: {e}")
             raise
-    
+
     def _clean_text(self, text: str) -> str:
-        """Limpa e normaliza o texto extraído do PDF."""
-        # Remove múltiplas linhas em branco e espaços
-        lines = text.split('\n')
+        """Clean and normalize text extracted from PDF."""
+        # Remove multiple blank lines and spaces
+        lines = text.split("\n")
         cleaned_lines = []
-        
+
         for line in lines:
-            cleaned_line = ' '.join(line.split())  # Remove espaços múltiplos
+            cleaned_line = " ".join(line.split())  # Remove multiple spaces
             if cleaned_line:
                 cleaned_lines.append(cleaned_line)
-        
-        return '\n'.join(cleaned_lines)
+
+        return "\n".join(cleaned_lines)
 
 
 class ContentExtractorFactory:
-    """Factory para criar extratores de conteúdo."""
-    
-    _extractors = {
-        'epub': EPUBExtractor,
-        'pdf': PDFExtractor
-    }
-    
+    """Factory to create content extractors."""
+
+    _extractors: ClassVar = {"epub": EPUBExtractor, "pdf": PDFExtractor}
+
     @classmethod
-    def create_extractor(cls, file_path: str, format_override: Optional[str] = None) -> ContentExtractor:
+    def create_extractor(
+        cls, file_path: str, format_override: str | None = None
+    ) -> ContentExtractor:
         """
-        Cria um extrator apropriado para o arquivo.
-        
+        Create an appropriate extractor for the file.
+
         Args:
-            file_path: Caminho para o arquivo
-            format_override: Força um formato específico (opcional)
-            
+            file_path: Path to the file
+            format_override: Force a specific format (optional)
+
         Returns:
-            Instância do extrator apropriado
+            Instance of the appropriate extractor
         """
         if format_override:
             format_type = format_override.lower()
         else:
             format_type = ContentExtractor.detect_format(file_path)
-        
+
         if format_type not in cls._extractors:
-            raise ValueError(f"Formato não suportado: {format_type}")
-        
+            raise ValueError(f"Unsupported format: {format_type}")
+
         return cls._extractors[format_type]()

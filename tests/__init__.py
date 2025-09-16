@@ -1,27 +1,27 @@
-# Arquivo __init__.py para o diretório de testes
-# Este arquivo permite que Python reconheça o diretório tests como um pacote
+# __init__.py file for the tests directory
+# This file allows Python to recognize the tests directory as a package
 
 """
-Suíte de testes para o projeto Tradutor.
+Test suite for BookTranslateAI project.
 
-Este pacote contém testes abrangentes para todos os módulos do sistema:
+This package contains comprehensive tests for all system modules:
 
-- test_chunker.py: Testes para fragmentação de texto
-- test_extractors.py: Testes para extração de conteúdo de arquivos
-- test_translator.py: Testes para tradução usando LLMs
-- test_parallel.py: Testes para processamento paralelo
-- test_progress.py: Testes para sistema de progresso e persistência
-- test_logging_config.py: Testes para configuração de logging
+- test_chunker.py: Tests for text fragmentation
+- test_extractors.py: Tests for content extraction from files
+- test_translator.py: Tests for translation using LLMs
+- test_parallel.py: Tests for parallel processing
+- test_progress.py: Tests for progress system and persistence
+- test_logging_config.py: Tests for logging configuration
 
-Para executar todos os testes:
+To run all tests:
     pytest tests/
 
-Para executar testes específicos:
+To run specific tests:
     pytest tests/test_chunker.py
 
-Para executar com cobertura:
+To run with coverage:
     pytest tests/ --cov=src --cov-report=html
 """
 
 __version__ = "1.0.0"
-__author__ = "Tradutor Project"
+__author__ = "BookTranslateAI Project"
