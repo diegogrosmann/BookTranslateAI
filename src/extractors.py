@@ -1,5 +1,39 @@
-"""
-Extratores de conteúdo para diferentes formatos de arquivo.
+"""Extratores de Conteúdo para Múltiplos Formatos.
+
+Este módulo fornece extratores especializados para diferentes formatos
+de arquivo, permitindo que o sistema de tradução processe livros em
+EPUB, PDF e potencialmente outros formatos.
+
+O sistema de extratores:
+    - Arquitetura baseada em Factory Pattern
+    - Detecção automática de formato
+    - Extração estruturada de capítulos/seções
+    - Limpeza e normalização de texto
+    - Tratamento de metadados
+    - Logging detalhado do processo
+
+Classes:
+    ContentExtractor: Classe base abstrata
+    EPUBExtractor: Extrator para arquivos EPUB
+    PDFExtractor: Extrator para arquivos PDF  
+    ContentExtractorFactory: Factory para criar extratores
+
+Example:
+    Uso básico dos extratores:
+    
+    >>> from extractors import ContentExtractorFactory
+    >>> 
+    >>> # Detecção automática do formato
+    >>> extractor = ContentExtractorFactory.create_extractor("book.epub")
+    >>> chapters = extractor.extract_content("book.epub")
+    >>> 
+    >>> for chapter in chapters:
+    ...     print(f"Capítulo: {chapter['title']}")
+    ...     print(f"Tamanho: {len(chapter['content'])} caracteres")
+
+Note:
+    Cada extrator retorna dados no mesmo formato padronizado,
+    facilitando processamento posterior independente da fonte.
 """
 import os
 import logging
@@ -17,21 +51,58 @@ logger = logging.getLogger(__name__)
 
 
 class ContentExtractor(ABC):
-    """Classe base abstrata para extratores de conteúdo."""
+    """Classe base abstrata para extratores de conteúdo.
+    
+    Define a interface comum que todos os extratores devem implementar.
+    Garante consistência no formato de saída independente do formato
+    de arquivo de entrada.
+    
+    Methods:
+        extract_content: Método principal para extração (abstrato)
+        detect_format: Detecta formato de arquivo (estático)
+    """
     
     @abstractmethod
     def extract_content(self, file_path: str) -> List[Dict[str, str]]:
-        """
-        Extrai conteúdo do arquivo.
+        """Extrai conteúdo estruturado do arquivo.
         
+        Este método deve ser implementado por cada extrator específico
+        e retornar uma lista padronizada de capítulos/seções.
+        
+        Args:
+            file_path: Caminho para o arquivo a ser processado
+            
         Returns:
-            Lista de dicionários com 'title' e 'content' para cada seção/capítulo.
+            Lista de dicionários com estrutura padrão:
+            - 'title': Título do capítulo/seção
+            - 'content': Conteúdo textual limpo
+            - 'id': Identificador único (opcional)
+            
+        Raises:
+            FileNotFoundError: Se arquivo não existe
+            Exception: Para erros específicos de formato
+            
+        Example:
+            >>> extractor = SomeExtractor()
+            >>> chapters = extractor.extract_content("book.ext")
+            >>> print(chapters[0]['title'])  # "Capítulo 1"
         """
         pass
     
     @staticmethod
     def detect_format(file_path: str) -> str:
-        """Detecta o formato do arquivo baseado na extensão."""
+        """Detecta formato de arquivo baseado na extensão.
+        
+        Args:
+            file_path: Caminho para o arquivo
+            
+        Returns:
+            String identificando o formato ('epub', 'pdf', 'unknown')
+            
+        Example:
+            >>> fmt = ContentExtractor.detect_format("book.epub")
+            >>> print(fmt)  # "epub"
+        """
         extension = Path(file_path).suffix.lower()
         if extension == '.epub':
             return 'epub'
@@ -42,7 +113,23 @@ class ContentExtractor(ABC):
 
 
 class EPUBExtractor(ContentExtractor):
-    """Extrator para arquivos EPUB."""
+    """Extrator especializado para arquivos EPUB.
+    
+    Implementa extração completa de conteúdo de arquivos EPUB,
+    incluindo processamento de HTML, extração de metadados
+    e limpeza de texto para tradução.
+    
+    Recursos:
+    - Processamento de todos os documentos HTML do EPUB
+    - Extração automática de títulos de seções
+    - Limpeza e normalização de texto
+    - Tratamento de encoding e caracteres especiais
+    - Logging detalhado do processo de extração
+    
+    Note:
+        Este extrator depende das bibliotecas 'ebooklib' e 'beautifulsoup4'
+        para processamento completo de arquivos EPUB.
+    """
     
     def extract_content(self, file_path: str) -> List[Dict[str, str]]:
         """
@@ -175,7 +262,23 @@ class EPUBExtractor(ContentExtractor):
 
 
 class PDFExtractor(ContentExtractor):
-    """Extrator para arquivos PDF."""
+    """Extrator especializado para arquivos PDF.
+    
+    Implementa extração de texto de arquivos PDF página por página,
+    com limpeza e normalização adequada para processamento posterior.
+    
+    Recursos:
+    - Extração página por página
+    - Limpeza de formatação e espaçamento
+    - Filtragem de páginas vazias
+    - Tratamento de encoding de caracteres
+    - Estatísticas de processamento
+    
+    Note:
+        Este extrator usa PyPDF2 para leitura de arquivos PDF.
+        Arquivos com proteção ou formatação complexa podem ter
+        resultados limitados.
+    """
     
     def extract_content(self, file_path: str) -> List[Dict[str, str]]:
         """

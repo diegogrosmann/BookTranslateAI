@@ -1,5 +1,40 @@
-"""
-Sistema de fragmentação de texto em chunks com overlap.
+"""Sistema de Fragmentação Inteligente de Texto.
+
+Este módulo implementa um sistema sofisticado para dividir textos longos
+em fragmentos (chunks) menores, mantendo contexto através de overlap e
+respeitando quebras naturais como parágrafos e sentenças.
+
+O sistema é essencial para tradução de textos longos com modelos de IA
+que têm limitações de contexto. Oferece:
+
+    - Fragmentação com overlap configurável para manter contexto
+    - Detecção de quebras naturais (parágrafos, sentenças)
+    - Ajuste automático para diferentes modelos de IA
+    - Logging detalhado do processo de fragmentação
+    - Estimativa de tokens para planejamento
+
+Classes:
+    TextChunk: Representa um fragmento de texto com metadados
+    TextChunker: Engine principal de fragmentação
+
+Example:
+    Uso básico do fragmentador:
+    
+    >>> chunker = TextChunker(
+    ...     chunk_size=4000,
+    ...     overlap_size=200,
+    ...     preserve_sentences=True
+    ... )
+    >>> 
+    >>> chunks = chunker.chunk_text(long_text, "chapter_1")
+    >>> print(f"Texto dividido em {len(chunks)} chunks")
+    >>> 
+    >>> # Processa múltiplos capítulos
+    >>> all_chunks = chunker.chunk_chapters(chapters)
+
+Note:
+    O sistema prioriza quebras naturais sobre tamanho exato dos chunks
+    para manter qualidade da tradução.
 """
 import logging
 import re
@@ -12,7 +47,31 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TextChunk:
-    """Representa um pedaço de texto fragmentado."""
+    """Representa um fragmento de texto com metadados de posição.
+    
+    Esta classe encapsula um fragmento de texto junto com informações
+    sobre sua posição original, overlaps e identificação dentro do
+    contexto maior (capítulo/documento).
+    
+    Attributes:
+        content: Texto do fragmento
+        start_pos: Posição inicial no texto original
+        end_pos: Posição final no texto original  
+        chunk_id: ID único do chunk dentro do capítulo
+        chapter_id: ID do capítulo ao qual este chunk pertence
+        overlap_start: Tamanho do overlap no início (caracteres)
+        overlap_end: Tamanho do overlap no final (caracteres)
+        
+    Example:
+        >>> chunk = TextChunk(
+        ...     content="Era uma vez...",
+        ...     start_pos=0,
+        ...     end_pos=13,
+        ...     chunk_id=0,
+        ...     chapter_id="cap1"
+        ... )
+        >>> print(f"Chunk {chunk.chunk_id}: {len(chunk.content)} chars")
+    """
     content: str
     start_pos: int
     end_pos: int
@@ -23,7 +82,39 @@ class TextChunk:
 
 
 class TextChunker:
-    """Classe para fragmentar texto em chunks com overlap."""
+    """Engine de fragmentação inteligente de texto.
+    
+    Esta classe implementa algoritmos sofisticados para dividir textos
+    longos em fragmentos menores, otimizados para tradução com IA.
+    
+    O fragmentador:
+    - Respeita limites de tamanho configuráveis
+    - Adiciona overlap entre chunks para manter contexto
+    - Prioriza quebras naturais (parágrafos, sentenças)
+    - Ajusta automaticamente para diferentes modelos de IA
+    - Fornece logging detalhado do processo
+    
+    Attributes:
+        chunk_size: Tamanho máximo de cada chunk em caracteres
+        overlap_size: Tamanho do overlap entre chunks
+        preserve_sentences: Se deve evitar quebrar sentenças
+        preserve_paragraphs: Se deve priorizar quebras entre parágrafos
+        
+    Example:
+        >>> # Configuração básica
+        >>> chunker = TextChunker(chunk_size=4000, overlap_size=200)
+        >>> 
+        >>> # Configuração avançada
+        >>> chunker = TextChunker(
+        ...     chunk_size=3000,
+        ...     overlap_size=300,
+        ...     preserve_sentences=True,
+        ...     preserve_paragraphs=True
+        ... )
+        >>> 
+        >>> # Ajuste automático para modelo
+        >>> chunker.adjust_chunk_size_for_model("gpt-4")
+    """
     
     def __init__(
         self,
@@ -285,25 +376,58 @@ class TextChunker:
         return context_text
     
     def estimate_tokens(self, text: str, tokens_per_char: float = 0.25) -> int:
-        """
-        Estima número de tokens baseado no número de caracteres.
+        """Estima número de tokens baseado no número de caracteres.
+        
+        Fornece uma estimativa aproximada do número de tokens que um texto
+        ocupará quando processado por modelos de IA. Útil para planejamento
+        e verificação de limites.
         
         Args:
             text: Texto a ser estimado
-            tokens_per_char: Razão média de tokens por caractere
-            
+            tokens_per_char: Razão média de tokens por caractere.
+                Default 0.25 é conservador para texto em português.
+                
         Returns:
-            Número estimado de tokens
+            Número estimado de tokens (inteiro)
+            
+        Note:
+            Esta é uma estimativa. Diferentes modelos podem ter 
+            tokenizações ligeiramente diferentes. O valor padrão
+            é conservador para evitar exceder limites.
+            
+        Example:
+            >>> chunker = TextChunker()
+            >>> tokens = chunker.estimate_tokens("Olá mundo!")
+            >>> print(f"Tokens estimados: {tokens}")
         """
         return int(len(text) * tokens_per_char)
     
     def adjust_chunk_size_for_model(self, model_name: str, max_tokens: int = None) -> None:
-        """
-        Ajusta o tamanho do chunk baseado no modelo e limites de contexto.
+        """Ajusta tamanho dos chunks para modelo específico.
+        
+        Automaticamente ajusta o tamanho dos chunks baseado nos limites
+        de contexto conhecidos de diferentes modelos de IA. Reserva espaço
+        para prompt do sistema, instruções e resposta.
         
         Args:
-            model_name: Nome do modelo (ex: 'gpt-4', 'claude-3')
-            max_tokens: Limite máximo de tokens (opcional)
+            model_name: Nome do modelo (ex: 'gpt-4', 'claude-3-sonnet').
+                Suporta detecção automática baseada em palavras-chave.
+            max_tokens: Limite máximo de tokens (opcional).
+                Se fornecido, sobrescreve detecção automática.
+                
+        Note:
+            O ajuste é conservador, usando apenas ~60-70% do limite
+            disponível para garantir espaço para prompt e resposta.
+            O overlap também é ajustado proporcionalmente.
+            
+        Example:
+            >>> chunker = TextChunker()
+            >>> 
+            >>> # Ajuste automático
+            >>> chunker.adjust_chunk_size_for_model("gpt-4-turbo")
+            >>> 
+            >>> # Limite manual
+            >>> chunker.adjust_chunk_size_for_model("custom-model", 50000)
         """
         # Estimativas conservadoras para diferentes modelos
         model_limits = {

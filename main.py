@@ -180,12 +180,7 @@ class ProgressDisplay:
               help='Apenas testa conexão com o modelo e sai')
 @click.option('--list-models', is_flag=True,
               help='Lista modelos disponíveis e sai')
-@click.option('--save-chapters-separately', is_flag=True,
-              help='Salva cada capítulo em arquivo separado antes de consolidar')
-@click.option('--output-dir', type=click.Path(),
-              help='Diretório de saída para capítulos separados (padrão: mesmo dir do arquivo final)')
-@click.option('--keep-chapter-files/--cleanup-chapter-files', default=True,
-              help='Manter arquivos de capítulos individuais após consolidação')
+# Opções de capítulos separados removidas - agora gera apenas no final
 def main(
     input_file: str,
     output_file: str,
@@ -204,10 +199,7 @@ def main(
     log_file: Optional[str],
     clean_terminal: bool,
     test_connection: bool,
-    list_models: bool,
-    save_chapters_separately: bool,
-    output_dir: Optional[str],
-    keep_chapter_files: bool
+    list_models: bool
 ):
     """
     Tradutor de Livros - Traduz EPUB e PDF usando IA.
@@ -333,10 +325,7 @@ def main(
         max_workers=max_workers,
         rate_limit=rate_limit,
         format_override=format_override,
-        resume=resume,
-        save_chapters_separately=save_chapters_separately,
-        output_dir=output_dir,
-        keep_chapter_files=keep_chapter_files
+        resume=resume
     ))
 
 
@@ -350,10 +339,7 @@ async def translate_book(
     max_workers: int,
     rate_limit: float,
     format_override: Optional[str],
-    resume: bool,
-    save_chapters_separately: bool = False,
-    output_dir: Optional[str] = None,
-    keep_chapter_files: bool = True
+    resume: bool
 ):
     """Função principal de tradução."""
     
@@ -379,36 +365,20 @@ async def translate_book(
         progress_manager = ProgressManager(progress_file)
         logger.debug("ProgressManager criado")
         
-        # Configura chapter manager se necessário
-        chapter_manager = None
-        if save_chapters_separately:
-            # Define diretório de saída
-            if output_dir:
-                chapters_output_dir = output_dir
-            else:
-                chapters_output_dir = os.path.dirname(output_file) or "."
-            
-            # Título do livro para nomeação
-            book_title = Path(input_file).stem
-            
-            chapter_manager = ChapterFileManager(chapters_output_dir, book_title)
-            logger.info(f"ChapterFileManager criado - Diretório: {chapters_output_dir}")
-            console.print(f"📁 [cyan]Capítulos serão salvos separadamente em: {chapter_manager.chapters_dir}[/cyan]")
-        
         # Título e autor do livro para documentos
         book_title = Path(input_file).stem
         book_author = "Autor Desconhecido"  # Poderia ser extraído dos metadados se disponível
         
         output_manager = OutputManager(
             output_file, 
-            chapter_manager,
+            chapter_manager=None,  # Não usa mais capítulos separados
             generate_documents=True,  # Sempre gerar documentos
             book_title=book_title,
             book_author=book_author
         )
         logger.debug(f"OutputManager criado para: {output_file}")
         logger.info("Gerenciadores configurados com sucesso")
-        console.print(f"📚 [green]Documentos EPUB e PDF serão gerados automaticamente[/green]")
+        console.print(f"📚 [green]Documentos MD, EPUB e PDF serão gerados no final[/green]")
         
         # Tenta carregar progresso existente
         logger.info("=== VERIFICANDO PROGRESSO EXISTENTE ===")
@@ -486,10 +456,8 @@ async def translate_book(
                 chapters=chapters
             )
             
-            # Inicializa arquivo de saída se não existir
-            if not output_manager.file_exists():
-                book_title = Path(input_file).stem
-                output_manager.initialize_file(f"Tradução: {book_title}")
+            # Arquivo de saída será criado apenas no final do processo
+            logger.info("Arquivo de saída será gerado no final do processamento")
         else:
             # Carrega capítulos do progresso existente
             console.print(f"📋 [cyan]Carregando capítulos do progresso salvo...[/cyan]")
@@ -577,26 +545,27 @@ async def translate_book(
             # Para display de progresso
             progress_display.stop_progress()
             
-            # Consolida capítulos se necessário
-            if save_chapters_separately:
-                logger.info("=== CONSOLIDANDO CAPÍTULOS ===")
-                console.print(f"\n📚 [cyan]Consolidando capítulos em arquivo único...[/cyan]")
+            # Gera arquivos finais (MD, EPUB, PDF) a partir do JSON de progresso
+            logger.info("=== GERANDO ARQUIVOS FINAIS ===")
+            console.print(f"\n📚 [cyan]Gerando arquivos finais (MD, EPUB, PDF)...[/cyan]")
+            
+            success = output_manager.generate_final_documents_from_progress(progress_manager)
+            if success:
+                console.print(f"✓ [green]Arquivos finais gerados com sucesso[/green]")
                 
-                success = output_manager.consolidate_chapters_if_needed()
-                if success:
-                    # Mostra status dos capítulos
-                    if chapter_manager:
-                        status = chapter_manager.get_status()
-                        console.print(f"✓ [green]{status['completed_chapters']} capítulos consolidados[/green]")
-                        console.print(f"📁 [blue]Capítulos individuais em: {status['chapters_dir']}[/blue]")
-                        
-                        # Limpeza de arquivos se solicitado
-                        if not keep_chapter_files:
-                            console.print(f"🧹 [yellow]Removendo arquivos de capítulos individuais...[/yellow]")
-                            chapter_manager.cleanup_temp_files(keep_chapters=False)
-                            console.print(f"✓ [green]Arquivos temporários removidos[/green]")
-                else:
-                    console.print(f"⚠ [yellow]Erro durante consolidação - arquivo de saída pode estar incompleto[/yellow]")
+                # Mostra arquivos gerados
+                console.print(f"📄 [green]Arquivo Markdown: {output_file}[/green]")
+                
+                # Verifica se EPUB e PDF foram gerados
+                epub_file = output_file.replace('.md', '.epub')
+                pdf_file = output_file.replace('.md', '.pdf')
+                
+                if os.path.exists(epub_file):
+                    console.print(f"📖 [green]Arquivo EPUB: {epub_file}[/green]")
+                if os.path.exists(pdf_file):
+                    console.print(f"📘 [green]Arquivo PDF: {pdf_file}[/green]")
+            else:
+                console.print(f"⚠ [yellow]Erro durante geração dos arquivos finais[/yellow]")
             
             # Mostra estatísticas finais
             logger.info("=== TRADUÇÃO CONCLUÍDA ===")

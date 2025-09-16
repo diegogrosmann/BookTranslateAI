@@ -28,6 +28,7 @@ class ChapterProgress:
     chapter_id: str
     title: str
     total_chunks: int
+    original_index: int = 0  # Índice original do capítulo no livro
     completed_chunks: int = 0
     translated_chunks: List[str] = field(default_factory=list)
     status: str = "pending"  # pending, in_progress, completed, error
@@ -212,7 +213,8 @@ class ProgressManager:
                 chapter_progress = ChapterProgress(
                     chapter_id=chapter_id,
                     title=chapter_title,
-                    total_chunks=0  # Será atualizado quando os chunks forem criados
+                    total_chunks=0,  # Será atualizado quando os chunks forem criados
+                    original_index=i  # Preserva a ordem original
                 )
                 
                 progress.chapters[chapter_id] = chapter_progress
@@ -245,6 +247,11 @@ class ProgressManager:
             # Reconstrói progresso dos capítulos
             chapters_dict = {}
             for chapter_id, chapter_data in data.get('chapters', {}).items():
+                # Adiciona original_index se não existir (compatibilidade com JSON antigo)
+                if 'original_index' not in chapter_data:
+                    chapter_data['original_index'] = 0  # Valor padrão
+                    logger.debug(f"Adicionado original_index=0 para compatibilidade: {chapter_id}")
+                
                 chapters_dict[chapter_id] = ChapterProgress(**chapter_data)
             
             progress.chapters = chapters_dict
@@ -542,34 +549,19 @@ class OutputManager:
     
     def append_chapter(self, chapter_title: str, translated_content: str, chapter_id: str = None) -> None:
         """
-        Adiciona um capítulo traduzido ao arquivo de saída.
+        Registra um capítulo traduzido (não salva em arquivo ainda).
+        A geração dos arquivos finais será feita apenas no final.
         
         Args:
             chapter_title: Título do capítulo
             translated_content: Conteúdo traduzido
-            chapter_id: ID do capítulo (usado quando salvando separadamente)
+            chapter_id: ID do capítulo
         """
         with self._lock:
-            # Se tem chapter_manager, salva separadamente
-            if self.chapter_manager and chapter_id:
-                self._chapter_counter += 1
-                # Registra o capítulo se ainda não foi registrado
-                if chapter_id not in self.chapter_manager.chapter_files:
-                    self.chapter_manager.register_chapter(
-                        self._chapter_counter, chapter_id, chapter_title
-                    )
-                
-                # Salva capítulo individual
-                success = self.chapter_manager.save_chapter(chapter_id, translated_content)
-                if success:
-                    logger.info(f"Capítulo salvo separadamente: {chapter_title}")
-                else:
-                    logger.error(f"Erro ao salvar capítulo separadamente: {chapter_title}")
-                    # Fallback para método tradicional
-                    self._append_traditional(chapter_title, translated_content)
-            else:
-                # Método tradicional
-                self._append_traditional(chapter_title, translated_content)
+            # Durante o processamento, apenas registra que o capítulo foi processado
+            # O conteúdo já está sendo salvo no JSON de progresso
+            logger.info(f"Capítulo registrado para geração final: {chapter_title}")
+            # Não salva em arquivo ainda - será feito no final
     
     def _append_traditional(self, chapter_title: str, translated_content: str) -> None:
         """
@@ -592,30 +584,244 @@ class OutputManager:
         
         logger.info(f"Capítulo adicionado ao arquivo: {chapter_title}")
     
+    def generate_final_documents_from_progress(self, progress_manager) -> bool:
+        """
+        Gera todos os arquivos finais (MD, EPUB, PDF) a partir do progresso JSON.
+        
+        Args:
+            progress_manager: Instância do ProgressManager com os dados de tradução
+            
+        Returns:
+            True se geração foi bem-sucedida
+        """
+        if not progress_manager.progress:
+            logger.error("Nenhum progresso disponível para gerar documentos")
+            return False
+        
+        try:
+            logger.info("Gerando arquivos finais a partir do progresso JSON...")
+            
+            # Usa ordenação inteligente baseada nos padrões das partes
+            chapters_by_index = self._sort_chapters_smartly(
+                {chapter_id: chapter 
+                 for chapter_id, chapter in progress_manager.progress.chapters.items()
+                 if chapter.status == "completed"}
+            )
+            
+            if not chapters_by_index:
+                logger.warning("Nenhum capítulo completado encontrado")
+                return False
+            
+            # Gera arquivo Markdown
+            logger.info("Gerando arquivo Markdown...")
+            success = self._generate_markdown_from_progress(chapters_by_index)
+            if not success:
+                return False
+            
+            # Gera documentos EPUB e PDF se habilitado
+            if self.generate_documents and DOCUMENT_GENERATOR_AVAILABLE:
+                logger.info("Gerando documentos EPUB e PDF...")
+                self._generate_final_documents()
+            
+            logger.info(f"Arquivos finais gerados com sucesso em: {self.output_file}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erro ao gerar arquivos finais: {e}")
+            return False
+    
+    def _generate_markdown_from_progress(self, chapters_by_index) -> bool:
+        """
+        Gera arquivo Markdown a partir dos capítulos ordenados.
+        
+        Args:
+            chapters_by_index: Lista de tuplas (index, chapter_id, chapter) ordenadas
+            
+        Returns:
+            True se bem-sucedido
+        """
+        try:
+            with self._lock:
+                # Inicializa arquivo com cabeçalho simples
+                header = f"""# {self.book_title}
+
+*Traduzido automaticamente*
+
+---
+
+"""
+                with open(self.output_file, 'w', encoding='utf-8') as f:
+                    f.write(header)
+                    
+                    # Adiciona cada capítulo na ordem original
+                    for original_index, chapter_id, chapter in chapters_by_index:
+                        if chapter.translated_chunks:
+                            # Junta todos os chunks traduzidos do capítulo
+                            full_translated_content = '\n\n'.join(chapter.translated_chunks)
+                            
+                            # Formata título do capítulo (remove duplicatas de "Winter's Heart")
+                            formatted_title = self._format_chapter_title(chapter.title, chapter_id)
+                            
+                            chapter_md = f"""
+## {formatted_title}
+
+{full_translated_content}
+
+---
+
+"""
+                            f.write(chapter_md)
+                            logger.debug(f"Capítulo adicionado ao MD: {formatted_title} (índice original: {original_index})")
+                        else:
+                            logger.warning(f"Capítulo sem conteúdo traduzido: {chapter.title}")
+                
+                logger.info(f"Arquivo Markdown gerado: {self.output_file}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Erro ao gerar arquivo Markdown: {e}")
+            return False
+    
+    def _format_chapter_title(self, title: str, chapter_id: str) -> str:
+        """
+        Formata o título do capítulo de forma inteligente.
+        
+        Args:
+            title: Título original
+            chapter_id: ID do capítulo (ex: part142)
+            
+        Returns:
+            Título formatado
+        """
+        import re
+        
+        # Se for um cabeçalho de capítulo específico (ex: "Chapter 3"), usa como está
+        if re.match(r'Chapter \d+', title):
+            return title
+        
+        # Se for um título genérico como "Winter's Heart", tenta melhorar baseado no part_id
+        if title.strip() == "Winter's Heart" or title.strip() == "Coração do Inverno":
+            match = re.match(r'part(\d+)', chapter_id)
+            if match:
+                part_num = int(match.group(1))
+                
+                if part_num < 10:
+                    # Partes iniciais - usa nome do livro
+                    if part_num == 1:
+                        return "Coração do Inverno"
+                    else:
+                        return f"Parte {part_num}"
+                
+                elif part_num < 100:
+                    # Divisores
+                    return f"Divisor {part_num}"
+                
+                else:
+                    # Capítulos de 3 dígitos
+                    chapter_num = part_num // 10
+                    section_type = part_num % 10
+                    
+                    if section_type == 2:
+                        return f"Capítulo {chapter_num // 2 + 1}"  # Aproximação do número do capítulo
+                    else:
+                        return title  # Mantém o título original para o conteúdo
+        
+        return title
+
+    def _decode_part_number(self, part_id: str) -> tuple:
+        """
+        Decodifica um part_id em uma tupla para ordenação inteligente.
+        
+        Args:
+            part_id: ID da parte (ex: "part142", "part1", "part11")
+            
+        Returns:
+            Tupla (chapter_group, chapter_order, section_type)
+        """
+        import re
+        
+        match = re.match(r'part(\d+)', part_id)
+        if not match:
+            return (0, 0, 0)
+        
+        part_num = int(match.group(1))
+        
+        if part_num < 10:
+            # Partes simples (prefácio, etc.)
+            return (0, part_num, 0)
+        
+        elif part_num < 100:
+            # Divisores entre capítulos (part11, part13, etc.)
+            return (part_num, 2, 0)  # Coloca após o conteúdo do capítulo
+            
+        else:
+            # Partes de 3 dígitos (capítulos)
+            chapter_num = part_num // 10  # Primeiros 2 dígitos
+            section_type = part_num % 10  # Último dígito
+            
+            # section_type: 1=conteúdo, 2=cabeçalho
+            # Queremos: cabeçalho primeiro (order=0), depois conteúdo (order=1)
+            chapter_order = 0 if section_type == 2 else 1
+            
+            return (chapter_num, chapter_order, section_type)
+
+    def _create_smart_ordering_key(self, chapter_data) -> tuple:
+        """
+        Cria chave de ordenação inteligente para capítulos.
+        
+        Args:
+            chapter_data: Dados do capítulo do JSON
+            
+        Returns:
+            Tupla para ordenação
+        """
+        chapter_id = chapter_data.chapter_id
+        original_index = chapter_data.original_index
+        
+        # Se for um chapter_id com padrão "part", usa ordenação inteligente
+        if chapter_id.startswith('part'):
+            chapter_group, chapter_order, section_type = self._decode_part_number(chapter_id)
+            return (chapter_group, chapter_order, section_type, original_index)
+        else:
+            # Para outros tipos, usa apenas o índice original
+            return (original_index, 0, 0, 0)
+
+    def _sort_chapters_smartly(self, chapters_dict) -> list:
+        """
+        Ordena capítulos de forma inteligente baseada nos padrões identificados.
+        
+        Args:
+            chapters_dict: Dicionário com dados dos capítulos
+            
+        Returns:
+            Lista de tuplas (original_index, chapter_id, chapter) ordenada
+        """
+        # Converte para lista com dados necessários para ordenação
+        chapters_list = []
+        for chapter_id, chapter_data in chapters_dict.items():
+            # Pula part1 que contém apenas informações do livro (não conteúdo narrativo)
+            if chapter_id == 'part1':
+                continue
+                
+            smart_key = self._create_smart_ordering_key(chapter_data)
+            chapters_list.append((smart_key, chapter_data.original_index, chapter_id, chapter_data))
+        
+        # Ordena usando chave inteligente
+        chapters_list.sort(key=lambda x: x[0])
+        
+        # Retorna no formato esperado
+        return [(original_index, chapter_id, chapter_data) 
+                for smart_key, original_index, chapter_id, chapter_data in chapters_list]
+
     def consolidate_chapters_if_needed(self) -> bool:
         """
-        Consolida capítulos separados em arquivo único se necessário.
+        OBSOLETO: Mantido para compatibilidade. Use generate_final_documents_from_progress().
         
         Returns:
-            True se consolidação foi feita ou não era necessária
+            True (compatibilidade)
         """
-        if not self.chapter_manager:
-            success = True  # Não há nada para consolidar
-        else:
-            logger.info("Consolidando capítulos em arquivo único...")
-            success = self.chapter_manager.consolidate_chapters(self.output_file)
-            
-            if success:
-                logger.info(f"Capítulos consolidados com sucesso em: {self.output_file}")
-            else:
-                logger.error("Erro durante consolidação dos capítulos")
-                return success
-        
-        # Gera documentos EPUB e PDF se habilitado
-        if self.generate_documents and success and DOCUMENT_GENERATOR_AVAILABLE:
-            self._generate_final_documents()
-        
-        return success
+        logger.warning("consolidate_chapters_if_needed() está obsoleto. Use generate_final_documents_from_progress()")
+        return True
     
     def _generate_final_documents(self) -> None:
         """Gera documentos EPUB e PDF finais."""

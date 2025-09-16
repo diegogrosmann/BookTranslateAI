@@ -1,5 +1,39 @@
-"""
-Cliente de tradução usando LiteLLM com suporte a múltiplos provedores.
+"""Cliente de Tradução usando LiteLLM.
+
+Este módulo fornece um cliente unificado para tradução de texto usando 
+múltiplos provedores de IA através da biblioteca LiteLLM.
+
+O cliente suporta:
+    - Múltiplos provedores (OpenAI, Anthropic, Google, Cohere, etc.)
+    - Configuração automática de chaves de API
+    - Retry automático com backoff exponencial
+    - Logging detalhado de requisições e respostas
+    - Configuração flexível de prompt e contexto
+    - Processamento de chunks de texto em lote
+
+Classes:
+    TranslationConfig: Configurações para tradução
+    TranslationClient: Cliente principal para tradução
+
+Example:
+    Uso básico do cliente de tradução:
+    
+    >>> config = TranslationConfig(
+    ...     model="gpt-3.5-turbo",
+    ...     target_language="pt-BR",
+    ...     context="Livro de ficção científica"
+    ... )
+    >>> client = TranslationClient(config, api_key="sua-chave-aqui")
+    >>> 
+    >>> # Teste de conexão
+    >>> success, message = await client.test_connection()
+    >>> if success:
+    ...     translated = await client.translate_text("Hello, world!")
+    ...     print(translated)  # "Olá, mundo!"
+
+Note:
+    Requer configuração adequada das chaves de API dos provedores.
+    Consulte a documentação do LiteLLM para detalhes específicos.
 """
 import os
 import logging
@@ -18,7 +52,25 @@ translation_logger = logging.getLogger('translation_requests')
 
 @dataclass
 class TranslationConfig:
-    """Configurações para tradução."""
+    """Configurações para o cliente de tradução.
+    
+    Esta classe encapsula todas as configurações necessárias para 
+    personalizar o comportamento do cliente de tradução.
+    
+    Attributes:
+        model: Nome do modelo de IA a ser usado (ex: "gpt-3.5-turbo")
+        target_language: Idioma alvo para tradução (ex: "pt-BR", "en", "es")
+        context: Contexto adicional sobre o conteúdo sendo traduzido
+        custom_instructions: Instruções específicas para o tradutor
+        
+    Example:
+        >>> config = TranslationConfig(
+        ...     model="claude-3-sonnet",
+        ...     target_language="pt-BR",
+        ...     context="Romance histórico ambientado no século XIX",
+        ...     custom_instructions="Mantenha o tom formal e eloquente"
+        ... )
+    """
     model: str
     target_language: str = "pt-BR"
     context: str = ""
@@ -26,7 +78,36 @@ class TranslationConfig:
 
 
 class TranslationClient:
-    """Cliente para tradução usando LiteLLM."""
+    """Cliente unificado para tradução usando LiteLLM.
+    
+    Esta classe fornece uma interface consistente para tradução de texto
+    usando diferentes provedores de IA através do LiteLLM. Inclui recursos
+    avançados como retry automático, logging detalhado e configuração
+    flexível de prompts.
+    
+    Attributes:
+        config: Configurações de tradução
+        api_key: Chave da API do provedor (opcional)
+        
+    Methods:
+        test_connection: Testa conectividade com o provedor
+        translate_text: Traduz um texto individual
+        translate_chunks: Traduz múltiplos chunks em lote
+        get_model_info: Retorna informações do modelo configurado
+        list_available_models: Lista modelos suportados (estático)
+        
+    Example:
+        >>> config = TranslationConfig(model="gpt-4", target_language="pt-BR")
+        >>> client = TranslationClient(config)
+        >>> 
+        >>> # Verifica conexão
+        >>> success, msg = await client.test_connection()
+        >>> 
+        >>> # Traduz texto
+        >>> if success:
+        ...     result = await client.translate_text("Hello world")
+        ...     print(result)  # "Olá mundo"
+    """
     
     def __init__(self, config: TranslationConfig, api_key: Optional[str] = None):
         """
@@ -119,7 +200,25 @@ class TranslationClient:
             return False, error_msg
     
     def _build_system_prompt(self, additional_context: str = "") -> str:
-        """Constrói o prompt do sistema para tradução."""
+        """Constrói o prompt do sistema para tradução.
+        
+        Cria um prompt abrangente que inclui instruções base, contexto
+        personalizado e instruções específicas para guiar o modelo de IA
+        durante a tradução.
+        
+        Args:
+            additional_context: Contexto específico para este trecho de texto
+            
+        Returns:
+            Prompt completo formatado para o sistema
+            
+        Note:
+            O prompt é construído de forma hierárquica:
+            1. Instruções principais de tradução
+            2. Contexto geral (se configurado)
+            3. Contexto adicional (se fornecido)
+            4. Instruções customizadas (se configuradas)
+        """
         base_prompt = f"""Você é um tradutor profissional especializado em traduzir textos para {self.config.target_language}.
 
 INSTRUÇÕES PRINCIPAIS:
@@ -244,15 +343,30 @@ INSTRUÇÕES PRINCIPAIS:
         chunks: List[str], 
         progress_callback: Optional[callable] = None
     ) -> List[str]:
-        """
-        Traduz múltiplos chunks de texto.
+        """Traduz múltiplos chunks de texto em sequência.
+        
+        Esta função processa uma lista de chunks de texto, traduzindo cada
+        um individualmente e reportando progresso através de callback.
+        Em caso de erro em um chunk, mantém o texto original.
         
         Args:
-            chunks: Lista de textos para traduzir
-            progress_callback: Função callback para reportar progresso
+            chunks: Lista de strings com textos para traduzir
+            progress_callback: Função opcional para reportar progresso.
+                Assinatura: callback(chunk_atual: int, total_chunks: int)
             
         Returns:
-            Lista de textos traduzidos
+            Lista de strings com os textos traduzidos na mesma ordem
+            
+        Raises:
+            Exception: Se houver erro crítico no processamento
+            
+        Example:
+            >>> chunks = ["Hello", "How are you?", "Goodbye"]
+            >>> def progress(current, total):
+            ...     print(f"Progresso: {current}/{total}")
+            >>> 
+            >>> translated = await client.translate_chunks(chunks, progress)
+            >>> print(translated)  # ["Olá", "Como você está?", "Tchau"]
         """
         translated_chunks = []
         
@@ -272,7 +386,18 @@ INSTRUÇÕES PRINCIPAIS:
         return translated_chunks
     
     def get_model_info(self) -> Dict[str, Any]:
-        """Retorna informações sobre o modelo configurado."""
+        """Retorna informações sobre o modelo configurado.
+        
+        Returns:
+            Dicionário contendo informações do modelo atual:
+            - model: Nome do modelo
+            - target_language: Idioma alvo configurado
+            
+        Example:
+            >>> info = client.get_model_info()
+            >>> print(info['model'])  # "gpt-3.5-turbo"
+            >>> print(info['target_language'])  # "pt-BR"
+        """
         info = {
             "model": self.config.model,
             "target_language": self.config.target_language
@@ -282,7 +407,24 @@ INSTRUÇÕES PRINCIPAIS:
     
     @staticmethod
     def list_available_models() -> List[str]:
-        """Lista modelos disponíveis no LiteLLM."""
+        """Lista modelos comumente disponíveis no LiteLLM.
+        
+        Esta função retorna uma lista de modelos que são tipicamente
+        suportados pelo LiteLLM. A disponibilidade real depende das
+        configurações de API e permissões do usuário.
+        
+        Returns:
+            Lista de strings com nomes de modelos suportados
+            
+        Note:
+            Esta é uma lista básica. O LiteLLM suporta muito mais modelos.
+            Consulte a documentação oficial para lista completa e atualizada.
+            
+        Example:
+            >>> models = TranslationClient.list_available_models()
+            >>> print("Modelos OpenAI:", [m for m in models if "gpt" in m])
+            >>> print("Modelos Anthropic:", [m for m in models if "claude" in m])
+        """
         # Esta é uma lista básica - LiteLLM suporta muitos mais
         return [
             # OpenAI
