@@ -1,27 +1,38 @@
 # BookTranslateAI
 
-> Automatic Book Translation System using AI Models
+> Automated Book Translation System using AI
 
-BookTranslateAI is a comprehensive system for automatic translation of books in EPUB and PDF formats using AI models through the LiteLLM library. It provides intelligent text processing, parallel processing capabilities, and seamless integration with multiple AI providers.
+BookTranslateAI is a complete system for automatic translation of books in EPUB a## ⚙️ Advanced Options
+
+### Chunk Control
+```bash
+--chunk-size 4000        # Maximum chunk size (characters)
+--overlap-size 200       # Overlap between chunks (characters)
+```
+
+### Performance
+```bash
+--max-workers 4          # Number of parallel workers
+--rate-limit 2.0         # Requests per second (0 = no limit)
+```s using AI models through the LiteLLM library. Supports multiple AI providers, parallel processing, and resuming interrupted translations.
 
 ## ✨ Features
 
-- **Multi-format Support**: Process EPUB and PDF files seamlessly
-- **Multiple AI Providers**: Support for OpenAI, Anthropic, Google, Cohere, and more through LiteLLM
-- **Intelligent Text Chunking**: Smart text fragmentation with overlap to maintain context
-- **Parallel Processing**: Multi-threaded translation for improved performance
-- **Resume Capability**: Continue interrupted translations from where they left off
-- **Progress Tracking**: Detailed progress monitoring and persistence
-- **Document Generation**: Automatic generation of translated EPUB and PDF documents
-- **Comprehensive Logging**: Detailed logging system with configurable levels
-- **Chapter Management**: Individual chapter processing and management
+- **Multiple Formats**: Processes EPUB and PDF files
+- **Multiple AI Providers**: OpenAI, Anthropic, Google, Cohere, and others via LiteLLM
+- **Smart Chunking**: Text division with overlap to maintain context
+- **Parallel Processing**: Multi-threaded translation for better performance
+- **Progress Resumption**: Continue interrupted translations from where they left off
+- **Progress Tracking**: Detailed and persistent monitoring
+- **Comprehensive Logging**: Configurable logging system
+- **Interactive Interface**: User-friendly script for non-technical users
 
 ## 🚀 Installation
 
 ### Prerequisites
 
 - Python 3.8 or higher
-- Valid API key for your chosen AI provider (OpenAI, Anthropic, etc.)
+- Valid API key for your AI provider (OpenAI, Anthropic, etc.)
 
 ### Install Dependencies
 
@@ -29,233 +40,288 @@ BookTranslateAI is a comprehensive system for automatic translation of books in 
 pip install -r requirements.txt
 ```
 
-### Required Python Packages
+## 📖 How to Use
 
-The system requires the following main dependencies:
-
-- `litellm` - Unified interface for multiple AI providers
-- `ebooklib` - EPUB file processing
-- `PyPDF2` - PDF file processing
-- `beautifulsoup4` - HTML parsing for EPUB content
-- `reportlab` - PDF generation
-- `tenacity` - Retry mechanisms
-
-## 🎯 Quick Start
-
-### Basic Usage
-
-```python
-from src.extractors import ContentExtractorFactory
-from src.translator import TranslationClient, TranslationConfig
-from src.chunker import TextChunker
-from src.progress import ProgressManager, OutputManager
-
-# 1. Extract content from book
-extractor = ContentExtractorFactory.create_extractor("book.epub")
-chapters = extractor.extract_content("book.epub")
-
-# 2. Configure translator
-config = TranslationConfig(
-    model="gpt-3.5-turbo",
-    target_language="pt-BR",
-    context="Fiction novel"
-)
-translator = TranslationClient(config, api_key="your-api-key")
-
-# 3. Test connection
-success, message = await translator.test_connection()
-if not success:
-    print(f"Connection failed: {message}")
-    exit(1)
-
-# 4. Set up text chunking
-chunker = TextChunker(
-    chunk_size=4000,
-    overlap_size=200,
-    preserve_sentences=True
-)
-
-# 5. Translate a chapter
-if chapters:
-    chunks = chunker.chunk_text(chapters[0]['content'], chapters[0]['id'])
-    for chunk in chunks:
-        translated = await translator.translate_text(chunk.content)
-        print(f"Translated chunk: {translated[:100]}...")
-```
-
-### Command Line Usage
-
-For full book translation, use the main application:
+### 1. Basic Translation
 
 ```bash
-# Set your API key
-export OPENAI_API_KEY="your-api-key-here"
+# Simple EPUB to Markdown translation
+python main.py --input book.epub --output-md translation.md --api-key your_api_key
 
-# Run translation
-python main.py
+# PDF translation
+python main.py --input document.pdf --output-md translation.md --api-key your_api_key
 ```
 
-## 🏗️ Architecture
-
-### Core Components
-
-- **Extractors** (`src/extractors.py`): Content extraction from EPUB/PDF files
-- **Chunker** (`src/chunker.py`): Intelligent text fragmentation
-- **Translator** (`src/translator.py`): AI-powered translation client
-- **Parallel Processor** (`src/parallel.py`): Multi-threaded processing coordination
-- **Progress Manager** (`src/progress.py`): Progress tracking and persistence
-- **Chapter Manager** (`src/chapter_manager.py`): Individual chapter management
-- **Document Generator** (`src/document_generator.py`): Output document generation
-- **Logging Config** (`src/logging_config.py`): Configurable logging system
-
-### Supported AI Models
-
-BookTranslateAI supports a wide range of AI models through LiteLLM:
-
-- **OpenAI**: GPT-3.5-turbo, GPT-4, GPT-4-turbo
-- **Anthropic**: Claude-3-sonnet, Claude-3-opus, Claude-3-haiku
-- **Google**: Gemini-pro, Gemini-pro-vision
-- **Cohere**: Command models
-- **And many more...**
-
-## ⚙️ Configuration
-
-### Translation Configuration
-
-```python
-from src.translator import TranslationConfig
-
-config = TranslationConfig(
-    model="gpt-4",
-    target_language="pt-BR",
-    context="Historical fiction novel set in the 19th century",
-    custom_instructions="Maintain formal tone and eloquent style"
-)
-```
-
-### Chunking Configuration
-
-```python
-from src.chunker import TextChunker
-
-chunker = TextChunker(
-    chunk_size=4000,      # Maximum characters per chunk
-    overlap_size=300,     # Overlap between chunks for context
-    preserve_sentences=True,    # Avoid breaking sentences
-    preserve_paragraphs=True    # Prefer paragraph breaks
-)
-```
-
-### Parallel Processing
-
-```python
-from src.parallel import ParallelProcessor
-
-processor = ParallelProcessor(
-    translator_config=config,
-    chunker=chunker,
-    progress_manager=progress_manager,
-    output_manager=output_manager,
-    max_workers=4,        # Number of parallel workers
-    rate_limit=2.0        # Requests per second
-)
-```
-
-## 📁 Project Structure
-
-```
-├── src/
-│   ├── __init__.py           # Package initialization
-│   ├── extractors.py         # Content extraction
-│   ├── chunker.py           # Text fragmentation  
-│   ├── translator.py        # Translation client
-│   ├── parallel.py          # Parallel processing
-│   ├── progress.py          # Progress management
-│   ├── chapter_manager.py   # Chapter management
-│   ├── document_generator.py # Document generation
-│   └── logging_config.py    # Logging configuration
-├── tests/                   # Unit tests
-├── input/                   # Input files directory
-├── logs/                    # Log files
-├── main.py                  # Main application
-├── requirements.txt         # Dependencies
-└── README.md               # This file
-```
-
-## 🧪 Testing
-
-Run the test suite:
+### 2. Interactive Script (Recommended for Beginners)
 
 ```bash
+# Run the interactive script that guides you through the process
+./executar.sh
+```
+
+The interactive script will:
+- Request the input file
+- Ask for your API key
+- Allow you to choose the AI model
+- Configure advanced options
+- Execute the translation with visual interface
+
+### 3. Advanced Usage Examples
+
+```bash
+# Translation with specific model (GPT-4)
+python main.py --input book.epub --output-md translation.md \
+    --model openai/gpt-4 --api-key your_key
+
+# Using Claude (Anthropic)
+python main.py --input book.epub --output-md translation.md \
+    --model anthropic/claude-3.5-sonnet --api-key your_key
+
+# With custom context
+python main.py --input book.epub --output-md translation.md \
+    --context "Epic fantasy romance" --api-key your_key
+
+# Loading context from file
+python main.py --input book.epub --output-md translation.md \
+    --context-file input/instructions.txt --api-key your_key
+
+# Translation to another language
+python main.py --input book.epub --output-md translation.md \
+    --target-lang pt-BR --api-key your_key
+
+# Performance configuration
+python main.py --input book.epub --output-md translation.md \
+    --max-workers 8 --chunk-size 5000 --rate-limit 3.0 --api-key your_key
+```
+
+### 4. Useful Commands
+
+```bash
+# List available models
+python main.py --list-models
+
+# Test API connection
+python main.py --test-connection --model openai/gpt-4 --api-key your_key
+
+# See complete help
+python main.py --help
+```
+
+## ⚙️ Environment Variables Configuration
+
+To avoid passing the API key every time, configure an environment variable:
+
+```bash
+# On Linux/Mac
+export API_KEY="your_api_key_here"
+export OPENAI_API_KEY="your_openai_key"  # For OpenAI specifically
+
+# On Windows
+set API_KEY=your_api_key_here
+```
+
+Then run without `--api-key`:
+
+```bash
+python main.py --input book.epub --output-md translation.md
+```
+
+## 🤖 Supported AI Models
+
+The system supports various models through LiteLLM:
+
+### OpenAI
+```bash
+--model openai/gpt-4-turbo        # Recommended for quality
+--model openai/gpt-4              # Good quality, slower
+--model openai/gpt-3.5-turbo      # Faster, less accurate
+```
+
+### Anthropic
+```bash
+--model anthropic/claude-3.5-sonnet    # Excellent for literature
+--model anthropic/claude-3-opus        # Maximum quality
+--model anthropic/claude-3-haiku       # Faster
+```
+
+### Google
+```bash
+--model gemini/gemini-pro         # Good free option
+--model gemini/gemini-pro-vision  # With image support
+```
+
+### Others
+```bash
+--model cohere/command-r-plus     # Cohere
+--model mistral/mistral-large     # Mistral AI
+```
+
+## � Opções Avançadas
+
+### Controle de Chunks
+```bash
+--chunk-size 4000        # Tamanho máximo do chunk (caracteres)
+--overlap-size 200       # Sobreposição entre chunks (caracteres)
+```
+
+### Performance
+```bash
+--max-workers 4          # Número de workers paralelos
+--rate-limit 2.0         # Requisições por segundo (0 = sem limite)
+```
+
+### Logging
+```bash
+--log-level INFO         # DEBUG, INFO, WARNING, ERROR
+--log-file translation.log  # Custom log file
+--clean-terminal         # Clean terminal vs. verbose
+```
+
+### Progress Resumption
+```bash
+--resume                 # Resume translation (default)
+--no-resume             # Force new translation
+```
+
+## 📋 Complete Workflow Example
+
+```bash
+# 1. Test connection first
+python main.py --test-connection --model openai/gpt-4 --api-key your_key
+
+# 2. Execute the translation
+python main.py \
+    --input input/book.epub \
+    --output-md output/translation.md \
+    --model openai/gpt-4-turbo \
+    --target-lang en-US \
+    --context-file input/instructions.txt \
+    --max-workers 6 \
+    --chunk-size 5000 \
+    --log-level INFO \
+    --api-key your_key
+
+# Alternative: High-performance translation with virtual environment
+./venv/bin/python main.py \
+    --input input/large_book.epub \
+    --output-md output/large_book.md \
+    --model gemini/gemini-2.5-pro \
+    --api-key your_gemini_key \
+    --max-workers 200 \
+    --target-lang pt-BR \
+    --chunk-size 300000 \
+    --context-file input/instructions.txt \
+    --rate-limit 2 \
+    --log-level WARNING \
+    --clean-terminal \
+    --overlap-size 0
+
+# 3. If interrupted, resume with the same command
+# The system automatically detects and continues from where it left off
+```
+
+## 📂 File Structure
+
+```
+├── input/                    # Place your books here
+│   ├── instructions.txt     # Example context file
+│   ├── book.epub           # Your EPUB books
+│   └── document.pdf        # Your PDF files
+├── logs/                    # Translation logs
+├── main.py                 # Main program
+├── executar.sh            # Interactive script
+└── src/                   # Source code
+```
+
+## 🔍 Troubleshooting
+
+### API Key Error
+```bash
+# Make sure the key is configured
+export API_KEY="your_key_here"
+python main.py --test-connection --model your_model
+```
+
+### Rate Limit Error
+```bash
+# Reduce speed
+python main.py --rate-limit 1.0 --max-workers 2 [other options]
+```
+
+### Chunk Size Error
+```bash
+# For models with smaller token limits
+python main.py --chunk-size 2000 --overlap-size 100 [other options]
+```
+
+### Insufficient Memory
+```bash
+# Reduce workers and chunks
+python main.py --max-workers 2 --chunk-size 3000 [other options]
+```
+
+## 💡 Usage Tips
+
+### For Long Books
+- Use `--max-workers 2` to avoid rate limits
+- Configure `--rate-limit 1.0` for APIs with restricted limits
+- Monitor logs in `logs/` to track progress
+
+### Custom Context
+Create an instructions file like `input/instructions.txt`:
+```
+You are a translator specialized in epic fantasy.
+Keep proper names original.
+Use formal and eloquent language.
+Preserve metaphors and figures of speech.
+```
+
+### Best Practices
+- **Test first**: Always use `--test-connection` before long translations
+- **Backup**: Keep copies of original files
+- **Progress**: Use `--log-level DEBUG` for detailed debugging
+- **Costs**: Monitor API usage to control expenses
+
+## 🧪 Testing the System
+
+```bash
+# Basic connection test
+python main.py --test-connection --model openai/gpt-3.5-turbo --api-key your_key
+
+# Test with small file
+python main.py --input small_file.epub --output-md test.md --api-key your_key
+
+# Run unit tests (for developers)
 pytest tests/
 ```
 
-Run specific test categories:
+## ❓ FAQ
 
-```bash
-# Test extractors
-pytest tests/test_extractors.py
+**Q: Can I translate password-protected PDFs?**
+A: No, the system does not support password-protected PDFs.
 
-# Test chunker
-pytest tests/test_chunker.py
+**Q: How much does it cost to translate a book?**
+A: It depends on the model and size. A 300-page book with GPT-4 costs approximately $10-20.
 
-# Test translator
-pytest tests/test_translator.py
-```
+**Q: Can I stop and continue later?**
+A: Yes! Use `--resume` (default) and the system continues from where it left off.
 
-## 📖 Documentation
+**Q: Which model is best for literature?**
+A: Claude-3.5-Sonnet or GPT-4-turbo are excellent for literary texts.
 
-### API Reference
-
-The system provides comprehensive docstrings following Google/NumPy style. Key classes:
-
-- `ContentExtractorFactory`: Factory for creating file extractors
-- `TranslationClient`: Main translation interface
-- `TextChunker`: Intelligent text fragmentation
-- `ParallelProcessor`: Parallel processing coordinator
-- `ProgressManager`: Progress tracking and persistence
-
-### Logging
-
-The system uses a sophisticated logging configuration:
-
-```python
-from src.logging_config import setup_logging
-
-setup_logging(
-    log_level="INFO",
-    log_file="logs/translation.log",
-    clean_terminal=True
-)
-```
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-### Development Setup
-
-1. Clone the repository
-2. Install dependencies: `pip install -r requirements.txt`
-3. Run tests: `pytest`
-4. Follow PEP 8 style guidelines
+**Q: How to speed up translation?**
+A: Increase `--max-workers` and `--rate-limit`, but be careful with API limits.
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 🔗 Links
+## 🔗 Useful Links
 
 - **Repository**: [https://github.com/diegogrosmann/BookTranslateAI](https://github.com/diegogrosmann/BookTranslateAI)
 - **Issues**: [https://github.com/diegogrosmann/BookTranslateAI/issues](https://github.com/diegogrosmann/BookTranslateAI/issues)
-- **LiteLLM Documentation**: [https://docs.litellm.ai/](https://docs.litellm.ai/)
-
-## 🙏 Acknowledgments
-
-- [LiteLLM](https://github.com/BerriAI/litellm) for the unified AI interface
-- [ebooklib](https://github.com/aerkalov/ebooklib) for EPUB processing
-- All the AI providers for making this possible
+- **LiteLLM**: [https://docs.litellm.ai/](https://docs.litellm.ai/)
 
 ---
 
-**Note**: This system requires valid API keys for AI providers. Ensure you have proper access and understand the pricing models of your chosen provider before processing large books.
+**⚠️ Warning**: This system requires valid API keys from AI providers. Make sure you understand pricing models before processing large books. Use responsibly respecting copyrights.
